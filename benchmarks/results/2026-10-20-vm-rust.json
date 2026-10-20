@@ -1,0 +1,2506 @@
+{
+ "schema": 1,
+ "env": {
+  "date_utc": "2026-10-20T18:00:14Z",
+  "host": "vm",
+  "cpu_model": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+  "cpu_count_logical": 2,
+  "ram_bytes": 8419655680,
+  "python": "3.13.16",
+  "heapdb": "0.5.0 (rust engine)",
+  "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+  "python_implementation": "CPython",
+  "os": "Linux-6.18.44-fc-v139-x86_64-with-glibc2.39",
+  "sqlite_version": "3.45.1",
+  "psutil": "7.2.2",
+  "psycopg": "3.3.6",
+  "git_sha": "da5cd211f393dc50c7202ef5123c8ff7fc298830",
+  "git_dirty": false,
+  "command": "python -m benchmarks.run --sizes 10k,100k,1m --max-size 10m --mem-headroom 0.95 --out benchmarks/results/2026-10-20-vm-rust.json",
+  "ci": false
+ },
+ "config": {
+  "sizes": [
+   10000,
+   100000,
+   1000000,
+   10000000
+  ],
+  "skipped_sizes": [],
+  "impls": [
+   "heapdb",
+   "bruteforce-rust",
+   "bruteforce",
+   "sqlite-mem",
+   "sqlite-disk",
+   "postgres"
+  ],
+  "queries": 500,
+  "warmup": 50,
+  "verify": 50,
+  "k": 5,
+  "entities": 100,
+  "days": 30.0,
+  "seed": 0,
+  "default_kernel": "lognormal_3h",
+  "default_bucket": 900.0,
+  "tolerance": 1e-09,
+  "quick": false,
+  "sens_size": 1000000,
+  "quality_seeds": 20,
+  "workload_defaults": {
+   "n_events": 0,
+   "n_entities": 100,
+   "days": 30.0,
+   "vocab": 2000,
+   "zipf_s": 1.1,
+   "max_features": 6,
+   "strong_fraction": 0.03,
+   "links": "skewed",
+   "seed": 0
+  }
+ },
+ "latency": [
+  {
+   "impl": "heapdb",
+   "n_events": 10000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 0.04981905499971617,
+   "n_feature_rows": 32570,
+   "ingest_seconds": 0.030429313000240654,
+   "ingest_events_per_s": 328630.48863183055,
+   "index_seconds": 0.0,
+   "index_note": "segment summaries + inverted index maintained on insert (in ingest)",
+   "rss_workload_bytes": 3190784,
+   "rss_delta_bytes": 8077312,
+   "rss_after_build_bytes": 31055872,
+   "info": {
+    "segments": 9804,
+    "bucket_seconds": 900.0
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.010881999514822382,
+      "p95_ms": 0.02116799987561535,
+      "p99_ms": 0.04936500045005232,
+      "mean_ms": 0.012164699995992123,
+      "max_ms": 0.10462400041433284
+     },
+     "events_scored_mean": 4.018,
+     "events_scored_p50": 5,
+     "events_scored_p99": 6,
+     "segments_in_window_mean": 4.548,
+     "segments_pruned_mean": 0.6,
+     "segments_pruned_fraction": 0.13192612137203166
+    }
+   ],
+   "wall_seconds": 0.20651784500023496
+  },
+  {
+   "impl": "bruteforce-rust",
+   "n_events": 10000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 0.04970033100016735,
+   "n_feature_rows": 32570,
+   "ingest_seconds": 0.028217330999723345,
+   "ingest_events_per_s": 354392.12872748467,
+   "index_seconds": 0.0,
+   "index_note": "segment summaries + inverted index maintained on insert (in ingest)",
+   "rss_workload_bytes": 3129344,
+   "rss_delta_bytes": 8077312,
+   "rss_after_build_bytes": 31223808,
+   "info": {
+    "segments": 9804,
+    "bucket_seconds": 900.0
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.004675000127463136,
+      "p95_ms": 0.007687999641348142,
+      "p99_ms": 0.011676000212901272,
+      "mean_ms": 0.005007793995901011,
+      "max_ms": 0.05294800030242186
+     }
+    }
+   ],
+   "wall_seconds": 0.19566934100021172
+  },
+  {
+   "impl": "bruteforce",
+   "n_events": 10000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 0.04446394200022041,
+   "n_feature_rows": 32570,
+   "ingest_seconds": 0.025895419000335096,
+   "ingest_events_per_s": 386168.6887503383,
+   "index_seconds": 0.005248571000265656,
+   "index_note": "per-entity sorted time arrays for bisect",
+   "rss_workload_bytes": 3129344,
+   "rss_delta_bytes": 9547776,
+   "rss_after_build_bytes": 32432128,
+   "info": {},
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.005322999641066417,
+      "p95_ms": 0.010908000149356667,
+      "p99_ms": 0.014178999663272407,
+      "mean_ms": 0.006084861977797118,
+      "max_ms": 0.059672000134014525
+     },
+     "events_in_window_mean": 4.614
+    }
+   ],
+   "wall_seconds": 0.19260884599952988
+  },
+  {
+   "impl": "sqlite-mem",
+   "n_events": 10000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 0.04434983600003761,
+   "n_feature_rows": 32570,
+   "ingest_seconds": 0.04945356900043407,
+   "ingest_events_per_s": 202209.87488106726,
+   "index_seconds": 0.006226354000318679,
+   "index_note": "CREATE INDEX events(entity, time) + ANALYZE (PKs built during ingest)",
+   "rss_workload_bytes": 3129344,
+   "rss_delta_bytes": 1953792,
+   "rss_after_build_bytes": 24850432,
+   "info": {
+    "sqlite_version": "3.45.1",
+    "path": ":memory:"
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.02478199985489482,
+      "p95_ms": 0.04254700070305262,
+      "p99_ms": 0.06383600066328654,
+      "mean_ms": 0.02587000203129719,
+      "max_ms": 0.07880700013629394
+     }
+    }
+   ],
+   "wall_seconds": 0.218896907999806
+  },
+  {
+   "impl": "sqlite-disk",
+   "n_events": 10000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 0.04511771600027714,
+   "n_feature_rows": 32570,
+   "ingest_seconds": 0.04697264999958861,
+   "ingest_events_per_s": 212889.8412179764,
+   "index_seconds": 0.006446878000133438,
+   "index_note": "CREATE INDEX events(entity, time) + ANALYZE (PKs built during ingest)",
+   "rss_workload_bytes": 3129344,
+   "rss_delta_bytes": 1982464,
+   "rss_after_build_bytes": 25014272,
+   "info": {
+    "sqlite_version": "3.45.1",
+    "path": "/tmp/heapdb-bench-sqlite-nzasif1g/bench.db",
+    "db_file_bytes": 811008
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.027303999559080694,
+      "p95_ms": 0.05343799966794904,
+      "p99_ms": 0.08263099971372867,
+      "mean_ms": 0.03019582002343668,
+      "max_ms": 0.3530410003804718
+     }
+    }
+   ],
+   "wall_seconds": 0.22695593600019492
+  },
+  {
+   "impl": "postgres",
+   "n_events": 10000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 0.044927430999450735,
+   "n_feature_rows": 32570,
+   "ingest_seconds": 0.05891706100010197,
+   "ingest_events_per_s": 169730.12282440043,
+   "index_seconds": 0.04315515799953573,
+   "index_note": "PKs + index events(entity, time) + ANALYZE, built after COPY",
+   "rss_workload_bytes": 3125248,
+   "rss_delta_bytes": 22392832,
+   "rss_after_build_bytes": 45408256,
+   "info": {
+    "server_version": "PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit",
+    "shared_buffers": "1GB",
+    "work_mem": "64MB",
+    "relation_bytes": 4554752
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.11969899969699327,
+      "p95_ms": 0.17795599978853716,
+      "p99_ms": 0.1991419994737953,
+      "mean_ms": 0.12610476598274545,
+      "max_ms": 0.3808760002357303
+     }
+    }
+   ],
+   "wall_seconds": 0.4931801299999279
+  },
+  {
+   "impl": "heapdb",
+   "n_events": 100000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 0.4917687319994002,
+   "n_feature_rows": 328169,
+   "ingest_seconds": 0.3656409610002811,
+   "ingest_events_per_s": 273492.3344650194,
+   "index_seconds": 0.0,
+   "index_note": "segment summaries + inverted index maintained on insert (in ingest)",
+   "rss_workload_bytes": 21213184,
+   "rss_delta_bytes": 60727296,
+   "rss_after_build_bytes": 101687296,
+   "info": {
+    "segments": 84623,
+    "bucket_seconds": 900.0
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.026402000003145076,
+      "p95_ms": 0.03450599979260005,
+      "p99_ms": 0.05597000017587561,
+      "mean_ms": 0.02756578797379916,
+      "max_ms": 0.07578699933219468
+     },
+     "events_scored_mean": 5.72,
+     "events_scored_p50": 6,
+     "events_scored_p99": 8,
+     "segments_in_window_mean": 39.142,
+     "segments_pruned_mean": 34.488,
+     "segments_pruned_fraction": 0.8810995861223239
+    }
+   ],
+   "wall_seconds": 1.1036582059996363
+  },
+  {
+   "impl": "bruteforce-rust",
+   "n_events": 100000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 0.5024474629999531,
+   "n_feature_rows": 328169,
+   "ingest_seconds": 0.28810468099982245,
+   "ingest_events_per_s": 347096.06124053785,
+   "index_seconds": 0.0,
+   "index_note": "segment summaries + inverted index maintained on insert (in ingest)",
+   "rss_workload_bytes": 21192704,
+   "rss_delta_bytes": 60776448,
+   "rss_after_build_bytes": 101703680,
+   "info": {
+    "segments": 84623,
+    "bucket_seconds": 900.0
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.02146299993910361,
+      "p95_ms": 0.028880999707325827,
+      "p99_ms": 0.05225200038694311,
+      "mean_ms": 0.02248565402078384,
+      "max_ms": 0.06845300049462821
+     }
+    }
+   ],
+   "wall_seconds": 1.0576257200000327
+  },
+  {
+   "impl": "bruteforce",
+   "n_events": 100000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 0.46093319400006294,
+   "n_feature_rows": 328169,
+   "ingest_seconds": 0.29164895200028695,
+   "ingest_events_per_s": 342877.9678930635,
+   "index_seconds": 0.06202978700002859,
+   "index_note": "per-entity sorted time arrays for bisect",
+   "rss_workload_bytes": 21192704,
+   "rss_delta_bytes": 93900800,
+   "rss_after_build_bytes": 134950912,
+   "info": {},
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.04895899928669678,
+      "p95_ms": 0.0781680000727647,
+      "p99_ms": 0.09319400032836711,
+      "mean_ms": 0.051665846000105375,
+      "max_ms": 0.12401299954944989
+     },
+     "events_in_window_mean": 45.69
+    }
+   ],
+   "wall_seconds": 1.2331232489996182
+  },
+  {
+   "impl": "sqlite-mem",
+   "n_events": 100000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 0.5092220699998506,
+   "n_feature_rows": 328169,
+   "ingest_seconds": 0.48516171099981875,
+   "ingest_events_per_s": 206116.84255528022,
+   "index_seconds": 0.07767568499912159,
+   "index_note": "CREATE INDEX events(entity, time) + ANALYZE (PKs built during ingest)",
+   "rss_workload_bytes": 21209088,
+   "rss_delta_bytes": 14831616,
+   "rss_after_build_bytes": 55762944,
+   "info": {
+    "sqlite_version": "3.45.1",
+    "path": ":memory:"
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.18726599955698475,
+      "p95_ms": 0.26923299992631655,
+      "p99_ms": 0.3473269998721662,
+      "mean_ms": 0.19509584599472873,
+      "max_ms": 0.38348399993992643
+     }
+    }
+   ],
+   "wall_seconds": 1.3764963519997764
+  },
+  {
+   "impl": "sqlite-disk",
+   "n_events": 100000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 0.47354684099991573,
+   "n_feature_rows": 328169,
+   "ingest_seconds": 0.5924561400006496,
+   "ingest_events_per_s": 168788.8659570485,
+   "index_seconds": 0.12853940799959673,
+   "index_note": "CREATE INDEX events(entity, time) + ANALYZE (PKs built during ingest)",
+   "rss_workload_bytes": 21196800,
+   "rss_delta_bytes": 14864384,
+   "rss_after_build_bytes": 55803904,
+   "info": {
+    "sqlite_version": "3.45.1",
+    "path": "/tmp/heapdb-bench-sqlite-rnup58z_/bench.db",
+    "db_file_bytes": 8351744
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.18613399970490718,
+      "p95_ms": 0.24939900049503194,
+      "p99_ms": 0.3182820000802167,
+      "mean_ms": 0.1920722100094281,
+      "max_ms": 0.4150360000494402
+     }
+    }
+   ],
+   "wall_seconds": 1.56434662600077
+  },
+  {
+   "impl": "postgres",
+   "n_events": 100000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 0.5282055819998277,
+   "n_feature_rows": 328169,
+   "ingest_seconds": 0.5144761749997997,
+   "ingest_events_per_s": 194372.46049350864,
+   "index_seconds": 0.30012276700017537,
+   "index_note": "PKs + index events(entity, time) + ANALYZE, built after COPY",
+   "rss_workload_bytes": 21213184,
+   "rss_delta_bytes": 24821760,
+   "rss_after_build_bytes": 65884160,
+   "info": {
+    "server_version": "PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit",
+    "shared_buffers": "1GB",
+    "work_mem": "64MB",
+    "relation_bytes": 37093376
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.5366779996620608,
+      "p95_ms": 0.9824819999266765,
+      "p99_ms": 1.1339940001562354,
+      "mean_ms": 0.6210722079886182,
+      "max_ms": 2.723953999520745
+     }
+    }
+   ],
+   "wall_seconds": 2.0656316829999923
+  },
+  {
+   "impl": "heapdb",
+   "n_events": 1000000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 5.5927660410006865,
+   "n_feature_rows": 3280417,
+   "ingest_seconds": 2.799573008000152,
+   "ingest_events_per_s": 357197.328714903,
+   "index_seconds": 0.0,
+   "index_note": "segment summaries + inverted index maintained on insert (in ingest)",
+   "rss_workload_bytes": 189353984,
+   "rss_delta_bytes": 298164224,
+   "rss_after_build_bytes": 507310080,
+   "info": {
+    "segments": 279021,
+    "bucket_seconds": 900.0
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.10737499997048872,
+      "p95_ms": 0.16672700076014735,
+      "p99_ms": 0.19988599979114952,
+      "mean_ms": 0.120497573965622,
+      "max_ms": 0.7001609992585145
+     },
+     "events_scored_mean": 19.192,
+     "events_scored_p50": 19,
+     "events_scored_p99": 30,
+     "segments_in_window_mean": 129.158,
+     "segments_pruned_mean": 124.714,
+     "segments_pruned_fraction": 0.9655925300794376
+    }
+   ],
+   "wall_seconds": 10.115595147000022
+  },
+  {
+   "impl": "bruteforce-rust",
+   "n_events": 1000000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 5.7601367390007,
+   "n_feature_rows": 3280417,
+   "ingest_seconds": 2.5821574299998247,
+   "ingest_events_per_s": 387273.05639147956,
+   "index_seconds": 0.0,
+   "index_note": "segment summaries + inverted index maintained on insert (in ingest)",
+   "rss_workload_bytes": 189186048,
+   "rss_delta_bytes": 298164224,
+   "rss_after_build_bytes": 507068416,
+   "info": {
+    "segments": 279021,
+    "bucket_seconds": 900.0
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.11862500014103716,
+      "p95_ms": 0.15693500063207466,
+      "p99_ms": 0.17279399980907328,
+      "mean_ms": 0.12511506000555528,
+      "max_ms": 0.6928650000190828
+     }
+    }
+   ],
+   "wall_seconds": 10.047935931000211
+  },
+  {
+   "impl": "bruteforce",
+   "n_events": 1000000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 5.511104436999631,
+   "n_feature_rows": 3280417,
+   "ingest_seconds": 4.8027710980004485,
+   "ingest_events_per_s": 208213.1293778154,
+   "index_seconds": 1.5383888940004908,
+   "index_note": "per-entity sorted time arrays for bisect",
+   "rss_workload_bytes": 189349888,
+   "rss_delta_bytes": 948404224,
+   "rss_after_build_bytes": 1157656576,
+   "info": {},
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.44229300056031207,
+      "p95_ms": 0.6991549998929258,
+      "p99_ms": 0.7641070005774964,
+      "mean_ms": 0.48897620203388215,
+      "max_ms": 3.588388999560266
+     },
+     "events_in_window_mean": 459.032
+    }
+   ],
+   "wall_seconds": 15.862444964999668
+  },
+  {
+   "impl": "sqlite-mem",
+   "n_events": 1000000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 5.626657978999901,
+   "n_feature_rows": 3280417,
+   "ingest_seconds": 5.400619361999816,
+   "ingest_events_per_s": 185163.94749762668,
+   "index_seconds": 1.3914077640001778,
+   "index_note": "CREATE INDEX events(entity, time) + ANALYZE (PKs built during ingest)",
+   "rss_workload_bytes": 188321792,
+   "rss_delta_bytes": 138510336,
+   "rss_after_build_bytes": 346718208,
+   "info": {
+    "sqlite_version": "3.45.1",
+    "path": ":memory:"
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 1.7498799998065806,
+      "p95_ms": 2.7088890001323307,
+      "p99_ms": 2.922888000284729,
+      "mean_ms": 1.8471365340283228,
+      "max_ms": 3.4816369998225127
+     }
+    }
+   ],
+   "wall_seconds": 14.924072953000177
+  },
+  {
+   "impl": "sqlite-disk",
+   "n_events": 1000000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 5.4655149799991705,
+   "n_feature_rows": 3280417,
+   "ingest_seconds": 5.70552761900035,
+   "ingest_events_per_s": 175268.6283858893,
+   "index_seconds": 1.7602847870002734,
+   "index_note": "CREATE INDEX events(entity, time) + ANALYZE (PKs built during ingest)",
+   "rss_workload_bytes": 189419520,
+   "rss_delta_bytes": 138588160,
+   "rss_after_build_bytes": 347803648,
+   "info": {
+    "sqlite_version": "3.45.1",
+    "path": "/tmp/heapdb-bench-sqlite-mgki242s/bench.db",
+    "db_file_bytes": 84799488
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 1.794318999600364,
+      "p95_ms": 3.2718619995648623,
+      "p99_ms": 4.33767300000909,
+      "mean_ms": 1.9835895839951263,
+      "max_ms": 6.5576179995332495
+     }
+    }
+   ],
+   "wall_seconds": 15.67894744700061
+  },
+  {
+   "impl": "postgres",
+   "n_events": 1000000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 5.552052557999559,
+   "n_feature_rows": 3280417,
+   "ingest_seconds": 5.9382619670004715,
+   "ingest_events_per_s": 168399.44171494996,
+   "index_seconds": 2.7535046089997195,
+   "index_note": "PKs + index events(entity, time) + ANALYZE, built after COPY",
+   "rss_workload_bytes": 189353984,
+   "rss_delta_bytes": 57155584,
+   "rss_after_build_bytes": 266457088,
+   "info": {
+    "server_version": "PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit",
+    "shared_buffers": "1GB",
+    "work_mem": "64MB",
+    "relation_bytes": 363372544
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 4.035622000628791,
+      "p95_ms": 4.703268999946886,
+      "p99_ms": 6.1950330000399845,
+      "mean_ms": 4.111514682019333,
+      "max_ms": 7.2196199998870725
+     }
+    }
+   ],
+   "wall_seconds": 18.49858928699996
+  },
+  {
+   "impl": "heapdb",
+   "n_events": 10000000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 65.40075643599994,
+   "n_feature_rows": 32804918,
+   "ingest_seconds": 34.01942193600007,
+   "ingest_events_per_s": 293949.7331498684,
+   "index_seconds": 0.0,
+   "index_note": "segment summaries + inverted index maintained on insert (in ingest)",
+   "rss_workload_bytes": 1890213888,
+   "rss_delta_bytes": 1783169024,
+   "rss_after_build_bytes": 3693273088,
+   "info": {
+    "segments": 288000,
+    "bucket_seconds": 900.0
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.5137389998708386,
+      "p95_ms": 0.6015720000505098,
+      "p99_ms": 0.6344650000755792,
+      "mean_ms": 0.516796954032543,
+      "max_ms": 1.4941139997972641
+     },
+     "events_scored_mean": 149.578,
+     "events_scored_p50": 146,
+     "events_scored_p99": 250,
+     "segments_in_window_mean": 133.266,
+     "segments_pruned_mean": 129.034,
+     "segments_pruned_fraction": 0.9682439632014167
+    }
+   ],
+   "wall_seconds": 121.38084725800036
+  },
+  {
+   "impl": "bruteforce-rust",
+   "n_events": 10000000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 64.13623985999948,
+   "n_feature_rows": 32804918,
+   "ingest_seconds": 31.553165509999417,
+   "ingest_events_per_s": 316925.41266044864,
+   "index_seconds": 0.0,
+   "index_note": "segment summaries + inverted index maintained on insert (in ingest)",
+   "rss_workload_bytes": 1890459648,
+   "rss_delta_bytes": 1782497280,
+   "rss_after_build_bytes": 3692646400,
+   "info": {
+    "segments": 288000,
+    "bucket_seconds": 900.0
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.7888630007073516,
+      "p95_ms": 1.153371000327752,
+      "p99_ms": 1.2127390000387095,
+      "mean_ms": 0.8302131359941995,
+      "max_ms": 1.2710089995380258
+     }
+    }
+   ],
+   "wall_seconds": 115.64691584799948
+  },
+  {
+   "impl": "bruteforce",
+   "n_events": 10000000,
+   "skipped": "estimated RSS 10.6 GiB (from 1138 B/event measured at a smaller size) exceeds 95% of available 5.8 GiB",
+   "bucket_seconds": 900.0,
+   "links": "skewed"
+  },
+  {
+   "impl": "sqlite-mem",
+   "n_events": 10000000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 61.28555614200013,
+   "n_feature_rows": 32804918,
+   "ingest_seconds": 57.637175265000224,
+   "ingest_events_per_s": 173499.13409223632,
+   "index_seconds": 20.55199320199972,
+   "index_note": "CREATE INDEX events(entity, time) + ANALYZE (PKs built during ingest)",
+   "rss_workload_bytes": 1890578432,
+   "rss_delta_bytes": 1395441664,
+   "rss_after_build_bytes": 3305807872,
+   "info": {
+    "sqlite_version": "3.45.1",
+    "path": ":memory:"
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 18.457139999554784,
+      "p95_ms": 28.98872300011135,
+      "p99_ms": 35.06071599986171,
+      "mean_ms": 20.17378390000158,
+      "max_ms": 37.40795700014132
+     }
+    }
+   ],
+   "wall_seconds": 170.10930181099957
+  },
+  {
+   "impl": "sqlite-disk",
+   "n_events": 10000000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 62.773466693000046,
+   "n_feature_rows": 32804918,
+   "ingest_seconds": 63.72744527299983,
+   "ingest_events_per_s": 156918.2627227773,
+   "index_seconds": 24.94438160699974,
+   "index_note": "CREATE INDEX events(entity, time) + ANALYZE (PKs built during ingest)",
+   "rss_workload_bytes": 1890361344,
+   "rss_delta_bytes": 1396793344,
+   "rss_after_build_bytes": 3306950656,
+   "info": {
+    "sqlite_version": "3.45.1",
+    "path": "/tmp/heapdb-bench-sqlite-c6osi64x/bench.db",
+    "db_file_bytes": 865005568
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 18.437892999827454,
+      "p95_ms": 28.932272999554698,
+      "p99_ms": 34.681598999668495,
+      "mean_ms": 20.06599536403337,
+      "max_ms": 38.4008740002173
+     }
+    }
+   ],
+   "wall_seconds": 184.51143072399918
+  },
+  {
+   "impl": "postgres",
+   "n_events": 10000000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 62.89552218300014,
+   "n_feature_rows": 32804918,
+   "ingest_seconds": 71.10331553299966,
+   "ingest_events_per_s": 140640.41775040593,
+   "index_seconds": 39.02636717899986,
+   "index_note": "PKs + index events(entity, time) + ANALYZE, built after COPY",
+   "rss_workload_bytes": 1890459648,
+   "rss_delta_bytes": 82952192,
+   "rss_after_build_bytes": 1993273344,
+   "info": {
+    "server_version": "PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit",
+    "shared_buffers": "1GB",
+    "work_mem": "64MB",
+    "relation_bytes": 3630448640
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 63.48881799931405,
+      "p95_ms": 129.3813140000566,
+      "p99_ms": 174.44292199979827,
+      "mean_ms": 71.96226374198523,
+      "max_ms": 296.1154519998672
+     }
+    }
+   ],
+   "wall_seconds": 241.59704038699965
+  }
+ ],
+ "sensitivity": [
+  {
+   "impl": "heapdb",
+   "n_events": 1000000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 5.433118998000282,
+   "n_feature_rows": 3280417,
+   "ingest_seconds": 2.79869179599973,
+   "ingest_events_per_s": 357309.7978953366,
+   "index_seconds": 0.0,
+   "index_note": "segment summaries + inverted index maintained on insert (in ingest)",
+   "rss_workload_bytes": 188887040,
+   "rss_delta_bytes": 298049536,
+   "rss_after_build_bytes": 506519552,
+   "info": {
+    "segments": 279021,
+    "bucket_seconds": 900.0
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.09967200003302423,
+      "p95_ms": 0.13516999933926854,
+      "p99_ms": 0.16938099997787504,
+      "mean_ms": 0.10451530598220415,
+      "max_ms": 0.19134699959977297
+     },
+     "events_scored_mean": 19.192,
+     "events_scored_p50": 19,
+     "events_scored_p99": 30,
+     "segments_in_window_mean": 129.158,
+     "segments_pruned_mean": 124.714,
+     "segments_pruned_fraction": 0.9655925300794376
+    },
+    {
+     "kernel": "exp_10m",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.01539999993838137,
+      "p95_ms": 0.01926000004459638,
+      "p99_ms": 0.03998300053353887,
+      "mean_ms": 0.016155773999344092,
+      "max_ms": 0.0624979993517627
+     },
+     "events_scored_mean": 9.446,
+     "events_scored_p50": 9,
+     "events_scored_p99": 17,
+     "segments_in_window_mean": 7.484,
+     "segments_pruned_mean": 4.772,
+     "segments_pruned_fraction": 0.6376269374665954
+    },
+    {
+     "kernel": "exp_6h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.1600599998710095,
+      "p95_ms": 0.21631499930663267,
+      "p99_ms": 0.26056700062326854,
+      "mean_ms": 0.16889475799507636,
+      "max_ms": 0.32730200018704636
+     },
+     "events_scored_mean": 20.026,
+     "events_scored_p50": 20,
+     "events_scored_p99": 32,
+     "segments_in_window_mean": 233.43,
+     "segments_pruned_mean": 228.79,
+     "segments_pruned_fraction": 0.9801225206700082
+    },
+    {
+     "kernel": "lognormal_narrow",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.04125100076635135,
+      "p95_ms": 0.06758499966963427,
+      "p99_ms": 0.08991899994725827,
+      "mean_ms": 0.044218752038432285,
+      "max_ms": 0.1406820001648157
+     },
+     "events_scored_mean": 18.356,
+     "events_scored_p50": 18,
+     "events_scored_p99": 32,
+     "segments_in_window_mean": 39.656,
+     "segments_pruned_mean": 35.352,
+     "segments_pruned_fraction": 0.891466612870688
+    },
+    {
+     "kernel": "lognormal_wide",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.9902179999699001,
+      "p95_ms": 1.3496560004568892,
+      "p99_ms": 2.5547160003043246,
+      "mean_ms": 1.0840147159688058,
+      "max_ms": 7.741907999843534
+     },
+     "events_scored_mean": 19.22,
+     "events_scored_p50": 19,
+     "events_scored_p99": 33,
+     "segments_in_window_mean": 1413.442,
+     "segments_pruned_mean": 1408.982,
+     "segments_pruned_fraction": 0.9968445822325925
+    },
+    {
+     "kernel": "window_24h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.06960199971217662,
+      "p95_ms": 0.10160000056202989,
+      "p99_ms": 0.12064599923178321,
+      "mean_ms": 0.07378171798154654,
+      "max_ms": 0.2680850002434454
+     },
+     "events_scored_mean": 22.014,
+     "events_scored_p50": 22,
+     "events_scored_p99": 32,
+     "segments_in_window_mean": 94.042,
+     "segments_pruned_mean": 89.11,
+     "segments_pruned_fraction": 0.9475553476106421
+    }
+   ],
+   "wall_seconds": 11.853074654000011
+  },
+  {
+   "impl": "bruteforce-rust",
+   "n_events": 1000000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 5.637430030999894,
+   "n_feature_rows": 3280417,
+   "ingest_seconds": 2.8769944059995396,
+   "ingest_events_per_s": 347584.9650297026,
+   "index_seconds": 0.0,
+   "index_note": "segment summaries + inverted index maintained on insert (in ingest)",
+   "rss_workload_bytes": 189353984,
+   "rss_delta_bytes": 298143744,
+   "rss_after_build_bytes": 507076608,
+   "info": {
+    "segments": 279021,
+    "bucket_seconds": 900.0
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.11878200075443601,
+      "p95_ms": 0.19179099945176858,
+      "p99_ms": 0.25544900017848704,
+      "mean_ms": 0.13139886602766637,
+      "max_ms": 0.41348099966853624
+     }
+    },
+    {
+     "kernel": "exp_10m",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.011098999493697193,
+      "p95_ms": 0.01570899985381402,
+      "p99_ms": 0.045898000280431006,
+      "mean_ms": 0.012266439989616629,
+      "max_ms": 0.09683200005383696
+     }
+    },
+    {
+     "kernel": "exp_6h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.19018300008610822,
+      "p95_ms": 0.2666849995875964,
+      "p99_ms": 0.3304030005892855,
+      "mean_ms": 0.20385247400554363,
+      "max_ms": 0.4589830004988471
+     }
+    },
+    {
+     "kernel": "lognormal_narrow",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.038795999898866285,
+      "p95_ms": 0.060525000662892126,
+      "p99_ms": 0.112749999971129,
+      "mean_ms": 0.04685072398024204,
+      "max_ms": 2.436179999676824
+     }
+    },
+    {
+     "kernel": "lognormal_wide",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 1.3059930006420473,
+      "p95_ms": 1.9295900001452537,
+      "p99_ms": 2.5785830002860166,
+      "mean_ms": 1.4377163500175811,
+      "max_ms": 7.978974000252492
+     }
+    },
+    {
+     "kernel": "window_24h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.08268100009445334,
+      "p95_ms": 0.12390900064929156,
+      "p99_ms": 0.18303400065633468,
+      "mean_ms": 0.08881583802030946,
+      "max_ms": 0.42926300011458807
+     }
+    }
+   ],
+   "wall_seconds": 12.383324147999701
+  },
+  {
+   "impl": "bruteforce",
+   "n_events": 1000000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 5.836006308999458,
+   "n_feature_rows": 3280417,
+   "ingest_seconds": 4.3736526840002625,
+   "ingest_events_per_s": 228641.84064231013,
+   "index_seconds": 1.4555462030002673,
+   "index_note": "per-entity sorted time arrays for bisect",
+   "rss_workload_bytes": 189353984,
+   "rss_delta_bytes": 948387840,
+   "rss_after_build_bytes": 1157582848,
+   "info": {},
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.43633600034809206,
+      "p95_ms": 0.5403509994721389,
+      "p99_ms": 0.6397440001819632,
+      "mean_ms": 0.4475718939629587,
+      "max_ms": 0.8722539996597334
+     },
+     "events_in_window_mean": 459.032
+    },
+    {
+     "kernel": "exp_10m",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.030743000024813227,
+      "p95_ms": 0.0590049994571018,
+      "p99_ms": 0.09119100013776915,
+      "mean_ms": 0.03965168400827679,
+      "max_ms": 2.3608090004927362
+     },
+     "events_in_window_mean": 23.336
+    },
+    {
+     "kernel": "exp_6h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.8399770003961748,
+      "p95_ms": 1.0807039998326218,
+      "p99_ms": 1.3263609998830361,
+      "mean_ms": 0.8712804000133474,
+      "max_ms": 4.992298000615847
+     },
+     "events_in_window_mean": 831.984
+    },
+    {
+     "kernel": "lognormal_narrow",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.14829900010226993,
+      "p95_ms": 0.21536399981414434,
+      "p99_ms": 0.24844700055837166,
+      "mean_ms": 0.1569468940015213,
+      "max_ms": 0.47589799942215905
+     },
+     "events_in_window_mean": 139.43
+    },
+    {
+     "kernel": "lognormal_wide",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 5.821478000143543,
+      "p95_ms": 7.6013469997633365,
+      "p99_ms": 9.283526999752212,
+      "mean_ms": 6.027993136001896,
+      "max_ms": 13.118576000124449
+     },
+     "events_in_window_mean": 5055.22
+    },
+    {
+     "kernel": "window_24h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.42612600009306334,
+      "p95_ms": 0.5715240004064981,
+      "p99_ms": 0.6738890006090514,
+      "mean_ms": 0.42635670199160813,
+      "max_ms": 1.1562250001588836
+     },
+     "events_in_window_mean": 333.51
+    }
+   ],
+   "wall_seconds": 21.337088553000285
+  },
+  {
+   "impl": "sqlite-mem",
+   "n_events": 1000000,
+   "bucket_seconds": 900.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 5.68703941900003,
+   "n_feature_rows": 3280417,
+   "ingest_seconds": 5.605880182999499,
+   "ingest_events_per_s": 178384.11941671878,
+   "index_seconds": 1.4039082839999537,
+   "index_note": "CREATE INDEX events(entity, time) + ANALYZE (PKs built during ingest)",
+   "rss_workload_bytes": 189186048,
+   "rss_delta_bytes": 138444800,
+   "rss_after_build_bytes": 347250688,
+   "info": {
+    "sqlite_version": "3.45.1",
+    "path": ":memory:"
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 1.7451600006097578,
+      "p95_ms": 2.835130000676145,
+      "p99_ms": 4.513875999691663,
+      "mean_ms": 1.937102144005621,
+      "max_ms": 12.604759999703674
+     }
+    },
+    {
+     "kernel": "exp_10m",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.08919500032789074,
+      "p95_ms": 0.1359390007564798,
+      "p99_ms": 0.14516100054606795,
+      "mean_ms": 0.09357627801728086,
+      "max_ms": 0.3074710002692882
+     }
+    },
+    {
+     "kernel": "exp_6h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 2.880352000829589,
+      "p95_ms": 4.722206999758782,
+      "p99_ms": 4.982685999493697,
+      "mean_ms": 3.1800350899720797,
+      "max_ms": 6.043811999916215
+     }
+    },
+    {
+     "kernel": "lognormal_narrow",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.5586509996646782,
+      "p95_ms": 0.7942410002215183,
+      "p99_ms": 1.0269530002915417,
+      "mean_ms": 0.5852464219824469,
+      "max_ms": 3.6238960001355736
+     }
+    },
+    {
+     "kernel": "lognormal_wide",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 19.49958999921364,
+      "p95_ms": 27.347471000211954,
+      "p99_ms": 29.960110000502027,
+      "mean_ms": 20.543074660006823,
+      "max_ms": 36.014197999975295
+     }
+    },
+    {
+     "kernel": "window_24h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 1.0658560004230822,
+      "p95_ms": 1.4393550000022515,
+      "p99_ms": 1.7620169992369483,
+      "mean_ms": 1.1069318159770773,
+      "max_ms": 2.0898590000797412
+     }
+    }
+   ],
+   "wall_seconds": 31.4477916980004
+  },
+  {
+   "impl": "heapdb",
+   "n_events": 1000000,
+   "bucket_seconds": 300.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 5.842763947999629,
+   "n_feature_rows": 3280417,
+   "ingest_seconds": 2.7012846179995904,
+   "ingest_events_per_s": 370194.23771070084,
+   "index_seconds": 0.0,
+   "index_note": "segment summaries + inverted index maintained on insert (in ingest)",
+   "rss_workload_bytes": 189353984,
+   "rss_delta_bytes": 441090048,
+   "rss_after_build_bytes": 650067968,
+   "info": {
+    "segments": 592037,
+    "bucket_seconds": 300.0
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.16232999951171223,
+      "p95_ms": 0.2363439998589456,
+      "p99_ms": 0.3495860000839457,
+      "mean_ms": 0.18481637598051748,
+      "max_ms": 3.477330999885453
+     },
+     "events_scored_mean": 9.992,
+     "events_scored_p50": 10,
+     "events_scored_p99": 16,
+     "segments_in_window_mean": 272.682,
+     "segments_pruned_mean": 267.938,
+     "segments_pruned_fraction": 0.9826024453392597
+    },
+    {
+     "kernel": "exp_10m",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.019700999473570846,
+      "p95_ms": 0.057047999689530116,
+      "p99_ms": 0.11932999950658996,
+      "mean_ms": 0.027836666009534383,
+      "max_ms": 1.4830170002824161
+     },
+     "events_scored_mean": 6.88,
+     "events_scored_p50": 7,
+     "events_scored_p99": 12,
+     "segments_in_window_mean": 14.598,
+     "segments_pruned_mean": 10.728,
+     "segments_pruned_fraction": 0.7348951911220715
+    },
+    {
+     "kernel": "exp_6h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.2636819999679574,
+      "p95_ms": 0.32956699942587875,
+      "p99_ms": 0.4059849998157006,
+      "mean_ms": 0.2739429539942648,
+      "max_ms": 0.9491410000919132
+     },
+     "events_scored_mean": 10.258,
+     "events_scored_p50": 10,
+     "events_scored_p99": 17,
+     "segments_in_window_mean": 493.994,
+     "segments_pruned_mean": 489.144,
+     "segments_pruned_fraction": 0.9901820669886678
+    },
+    {
+     "kernel": "lognormal_narrow",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.05783800042991061,
+      "p95_ms": 0.0896479996299604,
+      "p99_ms": 0.11643899961200077,
+      "mean_ms": 0.06208761397829221,
+      "max_ms": 0.3083620003963006
+     },
+     "events_scored_mean": 9.78,
+     "events_scored_p50": 10,
+     "events_scored_p99": 16,
+     "segments_in_window_mean": 83.132,
+     "segments_pruned_mean": 78.434,
+     "segments_pruned_fraction": 0.9434874657171727
+    },
+    {
+     "kernel": "lognormal_wide",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 1.5940529992803931,
+      "p95_ms": 2.0501679991866695,
+      "p99_ms": 3.35068999993382,
+      "mean_ms": 1.6914530320082122,
+      "max_ms": 11.373743999683938
+     },
+     "events_scored_mean": 10.072,
+     "events_scored_p50": 10,
+     "events_scored_p99": 17,
+     "segments_in_window_mean": 2997.896,
+     "segments_pruned_mean": 2993.112,
+     "segments_pruned_fraction": 0.9984042141555277
+    },
+    {
+     "kernel": "window_24h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.0984070002232329,
+      "p95_ms": 0.14491100046143401,
+      "p99_ms": 0.31736599976284197,
+      "mean_ms": 0.10878016001151991,
+      "max_ms": 0.532663999365468
+     },
+     "events_scored_mean": 10.91,
+     "events_scored_p50": 11,
+     "events_scored_p99": 17,
+     "segments_in_window_mean": 198.25,
+     "segments_pruned_mean": 193.284,
+     "segments_pruned_fraction": 0.9749508196721312
+    }
+   ],
+   "wall_seconds": 13.198361881999517
+  },
+  {
+   "impl": "heapdb",
+   "n_events": 1000000,
+   "bucket_seconds": 3600.0,
+   "links": "skewed",
+   "k": 5,
+   "generate_seconds": 5.352324488000704,
+   "n_feature_rows": 3280417,
+   "ingest_seconds": 2.6108859249998204,
+   "ingest_events_per_s": 383011.754908468,
+   "index_seconds": 0.0,
+   "index_note": "segment summaries + inverted index maintained on insert (in ingest)",
+   "rss_workload_bytes": 189362176,
+   "rss_delta_bytes": 217206784,
+   "rss_after_build_bytes": 426168320,
+   "info": {
+    "segments": 72000,
+    "bucket_seconds": 3600.0
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.06895300066389609,
+      "p95_ms": 0.10884600033023162,
+      "p99_ms": 0.1358740000796388,
+      "mean_ms": 0.07754430998647877,
+      "max_ms": 0.8012359994609142
+     },
+     "events_scored_mean": 48.922,
+     "events_scored_p50": 48,
+     "events_scored_p99": 82,
+     "segments_in_window_mean": 34.07,
+     "segments_pruned_mean": 30.67,
+     "segments_pruned_fraction": 0.9002054593484003
+    },
+    {
+     "kernel": "exp_10m",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.016912999853957444,
+      "p95_ms": 0.026617999537847936,
+      "p99_ms": 0.058521999562799465,
+      "mean_ms": 0.018897793988799094,
+      "max_ms": 0.0708030001987936
+     },
+     "events_scored_mean": 15.892,
+     "events_scored_p50": 15,
+     "events_scored_p99": 29,
+     "segments_in_window_mean": 2.686,
+     "segments_pruned_mean": 1.116,
+     "segments_pruned_fraction": 0.41548771407297097
+    },
+    {
+     "kernel": "exp_6h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.09965000026568305,
+      "p95_ms": 0.14061599995329743,
+      "p99_ms": 0.1729179994072183,
+      "mean_ms": 0.10635544201613811,
+      "max_ms": 0.35479400048643583
+     },
+     "events_scored_mean": 51.256,
+     "events_scored_p50": 50,
+     "events_scored_p99": 90,
+     "segments_in_window_mean": 61.0,
+     "segments_pruned_mean": 57.134,
+     "segments_pruned_fraction": 0.9366229508196722
+    },
+    {
+     "kernel": "lognormal_narrow",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.03141900015179999,
+      "p95_ms": 0.04884200006927131,
+      "p99_ms": 0.07472899960703216,
+      "mean_ms": 0.0336691879783757,
+      "max_ms": 0.10209500032942742
+     },
+     "events_scored_mean": 41.522,
+     "events_scored_p50": 41,
+     "events_scored_p99": 68,
+     "segments_in_window_mean": 10.974,
+     "segments_pruned_mean": 8.082,
+     "segments_pruned_fraction": 0.7364680153089119
+    },
+    {
+     "kernel": "lognormal_wide",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.4724550008177175,
+      "p95_ms": 0.6064880008125328,
+      "p99_ms": 0.7563029994344106,
+      "mean_ms": 0.4836209479944955,
+      "max_ms": 1.0527370004638215
+     },
+     "events_scored_mean": 43.912,
+     "events_scored_p50": 43,
+     "events_scored_p99": 73,
+     "segments_in_window_mean": 365.528,
+     "segments_pruned_mean": 362.226,
+     "segments_pruned_fraction": 0.9909664923070189
+    },
+    {
+     "kernel": "window_24h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.05121499998494983,
+      "p95_ms": 0.08184499984054128,
+      "p99_ms": 0.10661299984349171,
+      "mean_ms": 0.055691229994408786,
+      "max_ms": 0.23546200009150198
+     },
+     "events_scored_mean": 68.99,
+     "events_scored_p50": 69,
+     "events_scored_p99": 93,
+     "segments_in_window_mean": 25.0,
+     "segments_pruned_mean": 20.214,
+     "segments_pruned_fraction": 0.80856
+    }
+   ],
+   "wall_seconds": 10.929868735000127
+  },
+  {
+   "impl": "heapdb",
+   "n_events": 1000000,
+   "bucket_seconds": 900.0,
+   "links": "flat",
+   "k": 5,
+   "generate_seconds": 5.375203632999728,
+   "n_feature_rows": 3280417,
+   "ingest_seconds": 2.854054508000445,
+   "ingest_events_per_s": 350378.73214993416,
+   "index_seconds": 0.0,
+   "index_note": "segment summaries + inverted index maintained on insert (in ingest)",
+   "rss_workload_bytes": 156774400,
+   "rss_delta_bytes": 297705472,
+   "rss_after_build_bytes": 474046464,
+   "info": {
+    "segments": 279021,
+    "bucket_seconds": 900.0
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.09159999990515644,
+      "p95_ms": 0.13055999988864642,
+      "p99_ms": 0.1481890003560693,
+      "mean_ms": 0.09711787601190736,
+      "max_ms": 0.1719920001050923
+     },
+     "events_scored_mean": 16.312,
+     "events_scored_p50": 16,
+     "events_scored_p99": 27,
+     "segments_in_window_mean": 129.158,
+     "segments_pruned_mean": 125.258,
+     "segments_pruned_fraction": 0.9698044255872652
+    },
+    {
+     "kernel": "window_24h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.07295900013559731,
+      "p95_ms": 0.10791700060508447,
+      "p99_ms": 0.11867200009874068,
+      "mean_ms": 0.07675511599518359,
+      "max_ms": 0.13294800010044128
+     },
+     "events_scored_mean": 117.918,
+     "events_scored_p50": 117,
+     "events_scored_p99": 171,
+     "segments_in_window_mean": 94.042,
+     "segments_pruned_mean": 66.394,
+     "segments_pruned_fraction": 0.7060037004742562
+    }
+   ],
+   "wall_seconds": 9.936839069999223
+  },
+  {
+   "impl": "bruteforce-rust",
+   "n_events": 1000000,
+   "bucket_seconds": 900.0,
+   "links": "flat",
+   "k": 5,
+   "generate_seconds": 5.319509840000137,
+   "n_feature_rows": 3280417,
+   "ingest_seconds": 2.798979562000568,
+   "ingest_events_per_s": 357273.0625032685,
+   "index_seconds": 0.0,
+   "index_note": "segment summaries + inverted index maintained on insert (in ingest)",
+   "rss_workload_bytes": 156282880,
+   "rss_delta_bytes": 297705472,
+   "rss_after_build_bytes": 473694208,
+   "info": {
+    "segments": 279021,
+    "bucket_seconds": 900.0
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.11325499963277252,
+      "p95_ms": 0.19129399970552186,
+      "p99_ms": 0.2538130001994432,
+      "mean_ms": 0.13005018399417168,
+      "max_ms": 1.6196639999179752
+     }
+    },
+    {
+     "kernel": "window_24h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.071503999606648,
+      "p95_ms": 0.10506200032978086,
+      "p99_ms": 0.1146020003943704,
+      "mean_ms": 0.07455699395904958,
+      "max_ms": 0.12408699967636494
+     }
+    }
+   ],
+   "wall_seconds": 9.90249072900042
+  },
+  {
+   "impl": "bruteforce",
+   "n_events": 1000000,
+   "bucket_seconds": 900.0,
+   "links": "flat",
+   "k": 5,
+   "generate_seconds": 5.311738641999909,
+   "n_feature_rows": 3280417,
+   "ingest_seconds": 4.464429080000627,
+   "ingest_events_per_s": 223992.80671289316,
+   "index_seconds": 1.468296487999396,
+   "index_note": "per-entity sorted time arrays for bisect",
+   "rss_workload_bytes": 156196864,
+   "rss_delta_bytes": 949399552,
+   "rss_after_build_bytes": 1125285888,
+   "info": {},
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.4550849998850026,
+      "p95_ms": 0.5955610004093614,
+      "p99_ms": 0.7581999998365063,
+      "mean_ms": 0.47220363797714526,
+      "max_ms": 0.9709160003694706
+     },
+     "events_in_window_mean": 459.032
+    },
+    {
+     "kernel": "window_24h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 0.39735900008963654,
+      "p95_ms": 0.6073579997973866,
+      "p99_ms": 0.965152000389935,
+      "mean_ms": 0.434256622025714,
+      "max_ms": 4.297861000850389
+     },
+     "events_in_window_mean": 333.51
+    }
+   ],
+   "wall_seconds": 15.436174221999863
+  },
+  {
+   "impl": "sqlite-mem",
+   "n_events": 1000000,
+   "bucket_seconds": 900.0,
+   "links": "flat",
+   "k": 5,
+   "generate_seconds": 5.600660832999893,
+   "n_feature_rows": 3280417,
+   "ingest_seconds": 5.811379834000036,
+   "ingest_events_per_s": 172076.17271020627,
+   "index_seconds": 1.4664205159997437,
+   "index_note": "CREATE INDEX events(entity, time) + ANALYZE (PKs built during ingest)",
+   "rss_workload_bytes": 156397568,
+   "rss_delta_bytes": 129933312,
+   "rss_after_build_bytes": 306028544,
+   "info": {
+    "sqlite_version": "3.45.1",
+    "path": ":memory:"
+   },
+   "runs": [
+    {
+     "kernel": "lognormal_3h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 1.7858339997474104,
+      "p95_ms": 2.712514000450028,
+      "p99_ms": 2.975375999994867,
+      "mean_ms": 1.9060852659968077,
+      "max_ms": 6.736625000485219
+     }
+    },
+    {
+     "kernel": "window_24h",
+     "verified_queries": 50,
+     "verified_nonempty": 50,
+     "n_queries": 500,
+     "n_warmup": 50,
+     "latency": {
+      "p50_ms": 1.1386799997126218,
+      "p95_ms": 1.8212360000688932,
+      "p99_ms": 2.0474459997785743,
+      "mean_ms": 1.2370922280133527,
+      "max_ms": 4.259977000401705
+     }
+    }
+   ],
+   "wall_seconds": 16.182094191000033
+  }
+ ],
+ "quality": {
+  "n_seeds": 20,
+  "seeds": [
+   0,
+   19
+  ],
+  "attributions_per_seed_mean": 42.55,
+  "by_period": {
+   "recency": {
+    "days 0-3.5": {
+     "hit1": {
+      "mean": 0.33486516709822334,
+      "std": 0.09724119797592928,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.8131865617450655,
+      "std": 0.0933904833489296,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.5861447388780021,
+      "std": 0.06728255576359357,
+      "n_seeds": 20
+     },
+     "attributions": 486
+    },
+    "days 3.5-7": {
+     "hit1": {
+      "mean": 0.4106434866571993,
+      "std": 0.11677827728891059,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.8305702538511408,
+      "std": 0.09409972220120032,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.6189111716881304,
+      "std": 0.07737549299863206,
+      "n_seeds": 20
+     },
+     "attributions": 365
+    },
+    "all": {
+     "hit1": {
+      "mean": 0.3666145898265829,
+      "std": 0.06996157887761689,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.8164939308370045,
+      "std": 0.05700616424607801,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.5994800828494531,
+      "std": 0.04283744389042851,
+      "n_seeds": 20
+     },
+     "attributions": 851
+    }
+   },
+   "kernel_only": {
+    "days 0-3.5": {
+     "hit1": {
+      "mean": 0.4176197615376004,
+      "std": 0.12655263091996272,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.8544706547655716,
+      "std": 0.08694812988786396,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.6440005157146301,
+      "std": 0.08126801953677937,
+      "n_seeds": 20
+     },
+     "attributions": 486
+    },
+    "days 3.5-7": {
+     "hit1": {
+      "mean": 0.49519149221341374,
+      "std": 0.09698543386045895,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.8672223663309231,
+      "std": 0.09008618064006663,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.6818681886384323,
+      "std": 0.07162520475423198,
+      "n_seeds": 20
+     },
+     "attributions": 365
+    },
+    "all": {
+     "hit1": {
+      "mean": 0.4487048175301066,
+      "std": 0.07834298106130529,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.856877827476773,
+      "std": 0.058665090486274475,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.6591507412674099,
+      "std": 0.05153150767957917,
+      "n_seeds": 20
+     },
+     "attributions": 851
+    }
+   },
+   "priors_only": {
+    "days 0-3.5": {
+     "hit1": {
+      "mean": 0.501776673673253,
+      "std": 0.12543993590351513,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.9017632073157967,
+      "std": 0.04419346924821415,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.7024433836580363,
+      "std": 0.07411603483540352,
+      "n_seeds": 20
+     },
+     "attributions": 486
+    },
+    "days 3.5-7": {
+     "hit1": {
+      "mean": 0.5828539701283504,
+      "std": 0.14332365286379417,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.89829208374049,
+      "std": 0.08335715442012098,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.7459330447767284,
+      "std": 0.08837219518898369,
+      "n_seeds": 20
+     },
+     "attributions": 365
+    },
+    "all": {
+     "hit1": {
+      "mean": 0.5362699105304319,
+      "std": 0.07601990154722865,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.8989102323235466,
+      "std": 0.047511485889547886,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.7207669431407748,
+      "std": 0.05031955102951093,
+      "n_seeds": 20
+     },
+     "attributions": 851
+    }
+   },
+   "heapdb_proportional": {
+    "days 0-3.5": {
+     "hit1": {
+      "mean": 0.5356532096656778,
+      "std": 0.0975949453924932,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.9096904948974961,
+      "std": 0.04854199649930038,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.72040525187097,
+      "std": 0.061478054322272525,
+      "n_seeds": 20
+     },
+     "attributions": 486
+    },
+    "days 3.5-7": {
+     "hit1": {
+      "mean": 0.5998022374336991,
+      "std": 0.11131910202292272,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.9121799101107847,
+      "std": 0.07110078048002255,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.7575788071876375,
+      "std": 0.06765850665512721,
+      "n_seeds": 20
+     },
+     "attributions": 365
+    },
+    "all": {
+     "hit1": {
+      "mean": 0.5622307253020411,
+      "std": 0.07586189702262666,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.9086080215655101,
+      "std": 0.039668760906623385,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.735524669361014,
+      "std": 0.04910559494330622,
+      "n_seeds": 20
+     },
+     "attributions": 851
+    }
+   },
+   "heapdb_uniform": {
+    "days 0-3.5": {
+     "hit1": {
+      "mean": 0.5153715393491608,
+      "std": 0.1163870322048848,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.9053658169586878,
+      "std": 0.05794741677762534,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.7089589799477187,
+      "std": 0.06984044978194857,
+      "n_seeds": 20
+     },
+     "attributions": 486
+    },
+    "days 3.5-7": {
+     "hit1": {
+      "mean": 0.5758765367513364,
+      "std": 0.12374893439471678,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.9092559335025976,
+      "std": 0.07545047124444965,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.7437459626756758,
+      "std": 0.07710817361873215,
+      "n_seeds": 20
+     },
+     "attributions": 365
+    },
+    "all": {
+     "hit1": {
+      "mean": 0.5404369645987259,
+      "std": 0.0785591376446933,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.9052870252819337,
+      "std": 0.048314946913591804,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.7234054537435224,
+      "std": 0.051464857310586705,
+      "n_seeds": 20
+     },
+     "attributions": 851
+    }
+   }
+  },
+  "by_effect": {
+   "recency": {
+    "failing_main_check": {
+     "hit1": {
+      "mean": 0.4476498615333755,
+      "std": 0.09576002931035077,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.9051778237672201,
+      "std": 0.06723540514904185,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.6680669405700366,
+      "std": 0.060716410148754146,
+      "n_seeds": 20
+     },
+     "attributions": 315
+    },
+    "error_spike": {
+     "hit1": {
+      "mean": 0.45634826774532655,
+      "std": 0.14621460014967472,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.9403232959850607,
+      "std": 0.06603070099694058,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.6828087469447763,
+      "std": 0.08321876724243948,
+      "n_seeds": 20
+     },
+     "attributions": 234
+    },
+    "incident": {
+     "hit1": {
+      "mean": 0.21748316489600644,
+      "std": 0.08591924234011451,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.6316244075468063,
+      "std": 0.11367544219652866,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.46707938908989205,
+      "std": 0.05515662077518191,
+      "n_seeds": 20
+     },
+     "attributions": 302
+    }
+   },
+   "kernel_only": {
+    "failing_main_check": {
+     "hit1": {
+      "mean": 0.49287623453258134,
+      "std": 0.10292018777405657,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.9277882016504307,
+      "std": 0.0513038549997789,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.6996179309381709,
+      "std": 0.06702730873519384,
+      "n_seeds": 20
+     },
+     "attributions": 315
+    },
+    "error_spike": {
+     "hit1": {
+      "mean": 0.545568483803778,
+      "std": 0.13418590381468729,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.9269753734827264,
+      "std": 0.07882329308530032,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.7331141788494729,
+      "std": 0.08445062739178558,
+      "n_seeds": 20
+     },
+     "attributions": 234
+    },
+    "incident": {
+     "hit1": {
+      "mean": 0.33031348263916577,
+      "std": 0.13615820774133836,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.7389323239390543,
+      "std": 0.11030069094924601,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.5648288347055463,
+      "std": 0.08802018373284343,
+      "n_seeds": 20
+     },
+     "attributions": 302
+    }
+   },
+   "priors_only": {
+    "failing_main_check": {
+     "hit1": {
+      "mean": 0.5681421367160532,
+      "std": 0.1173042163087507,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.9523960140736456,
+      "std": 0.056865116345003894,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.752678677281038,
+      "std": 0.07128022003002284,
+      "n_seeds": 20
+     },
+     "attributions": 315
+    },
+    "error_spike": {
+     "hit1": {
+      "mean": 0.6520461238108297,
+      "std": 0.15325258377392814,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.9569695378151261,
+      "std": 0.04825754697180854,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.7990306326979122,
+      "std": 0.09231347343818003,
+      "n_seeds": 20
+     },
+     "attributions": 234
+    },
+    "incident": {
+     "hit1": {
+      "mean": 0.4174542226610978,
+      "std": 0.14230553191600304,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.8045671911582533,
+      "std": 0.10753658130276215,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.6311336954908017,
+      "std": 0.09524132095889852,
+      "n_seeds": 20
+     },
+     "attributions": 302
+    }
+   },
+   "heapdb_proportional": {
+    "failing_main_check": {
+     "hit1": {
+      "mean": 0.612115357982231,
+      "std": 0.11956656881982201,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.9549733213123306,
+      "std": 0.0526629439478717,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.7761575588047144,
+      "std": 0.07538181342361053,
+      "n_seeds": 20
+     },
+     "attributions": 315
+    },
+    "error_spike": {
+     "hit1": {
+      "mean": 0.6652499338896398,
+      "std": 0.13166686765317437,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.9575997899159663,
+      "std": 0.046111069316582085,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.8076419526143791,
+      "std": 0.08236492227897443,
+      "n_seeds": 20
+     },
+     "attributions": 234
+    },
+    "incident": {
+     "hit1": {
+      "mean": 0.4311631036493905,
+      "std": 0.15198451559546436,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.8284633592746224,
+      "std": 0.10241618670677438,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.6401584910127449,
+      "std": 0.09438600294908478,
+      "n_seeds": 20
+     },
+     "attributions": 302
+    }
+   },
+   "heapdb_uniform": {
+    "failing_main_check": {
+     "hit1": {
+      "mean": 0.587125720426804,
+      "std": 0.0992830725145182,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.958854347406979,
+      "std": 0.05074548889085228,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.762935502713947,
+      "std": 0.06439390148786851,
+      "n_seeds": 20
+     },
+     "attributions": 315
+    },
+    "error_spike": {
+     "hit1": {
+      "mean": 0.629398008037714,
+      "std": 0.11603805026466281,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.9578028711484594,
+      "std": 0.05234318670511581,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.7883887157232745,
+      "std": 0.07111896354680945,
+      "n_seeds": 20
+     },
+     "attributions": 234
+    },
+    "incident": {
+     "hit1": {
+      "mean": 0.42186490113213093,
+      "std": 0.1625625268639416,
+      "n_seeds": 20
+     },
+     "hit3": {
+      "mean": 0.8169179398247912,
+      "std": 0.1026808486200934,
+      "n_seeds": 20
+     },
+     "mrr": {
+      "mean": 0.6346036773972434,
+      "std": 0.10398690975214257,
+      "n_seeds": 20
+     },
+     "attributions": 302
+    }
+   }
+  },
+  "seed_wins_second_half": {
+   "recency_beats_heapdb_hit1": 2,
+   "heapdb_beats_recency_hit1": 17,
+   "ties": 1
+  },
+  "seconds": 0.29623859000002994
+ },
+ "postgres": {
+  "measured": true,
+  "description": "PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit; local throwaway cluster (/usr/lib/postgresql/16), shared_buffers=1GB, work_mem=64MB, maintenance_work_mem=512MB, max_wal_size=4GB"
+ },
+ "total_seconds": 1083.8230831700002
+}

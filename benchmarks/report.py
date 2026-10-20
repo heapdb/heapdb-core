@@ -3,9 +3,9 @@
     python -m benchmarks.report benchmarks/results/<file>.json [-o benchmarks/RESULTS.md]
         [--compare benchmarks/results/<older-run>.json]
 
-``--compare`` adds a "Python engine vs Rust engine" section that puts the
-``heapdb`` numbers of an older run (the v0.4 pure-Python engine) next to
-this run's.
+``--compare`` (repeatable) adds a "Python engine vs Rust engine" section
+that puts the ``heapdb`` numbers of an older run (the pure-Python engine)
+next to this run's, one subsection per file.
 
 Every number in the output is copied from the JSON (only formatted). The
 hand-written "Reading these results" text lives in
@@ -90,18 +90,22 @@ def _status(r: dict[str, Any]) -> str | None:
     return None
 
 
-def render_compare(new: dict[str, Any], old: dict[str, Any], old_rel: str) -> str:
+def render_compare(new: dict[str, Any], old: dict[str, Any], old_rel: str, heading: str) -> str:
     """Python engine (older run) vs Rust engine (this run), heapdb only."""
     L: list[str] = []
     oe, ne = old["env"], new["env"]
-    L.append("## Python engine vs Rust engine\n")
-    L.append(f"`heapdb` rows of the v0.4 pure-Python engine (from "
+    L.append(f"### {heading}\n")
+    L.append(f"`heapdb` rows of the pure-Python engine (from "
              f"[`{os.path.basename(old_rel)}`](results/{os.path.basename(old_rel)}), git "
-             f"`{(oe.get('git_sha') or '')[:7]}`, {oe['date_utc']}, host `{oe['host']}`) next "
-             f"to this run's Rust engine (git `{(ne.get('git_sha') or '')[:7]}`, host "
-             f"`{ne['host']}`). Same workload generator, seed, queries and kernel; the "
+             f"`{(oe.get('git_sha') or '')[:7]}`, {oe['date_utc']}, host `{oe['host']}`, CPU "
+             f"{oe['cpu_model']}) next to this run's Rust engine (git "
+             f"`{(ne.get('git_sha') or '')[:7]}`, {ne['date_utc']}, host `{ne['host']}`, CPU "
+             f"{ne['cpu_model']}). Same workload generator, seed, queries and kernel; the "
              "Python engine's `bruteforce` used Python scoring, this run's uses Rust scoring. "
-             "Speed-up = Python / Rust.\n")
+             "Speed-up = Python / Rust."
+             + (" **The two runs used different CPUs** (same VM type and name, different "
+                "host hardware), so the speed-ups include a hardware difference."
+                if oe.get("cpu_model") != ne.get("cpu_model") else "") + "\n")
     k = new["config"]["default_kernel"]
 
     def get(res, impl, n):
@@ -187,7 +191,7 @@ def render_compare(new: dict[str, Any], old: dict[str, Any], old_rel: str) -> st
 
 
 def render(res: dict[str, Any], json_rel: str,
-           compare: tuple[dict[str, Any], str] | None = None) -> str:
+           compare: list[tuple[dict[str, Any], str]] | None = None) -> str:
     env, cfg = res["env"], res["config"]
     L: list[str] = []
     L.append("# HeapDB benchmark results\n")
@@ -222,7 +226,12 @@ def render(res: dict[str, Any], json_rel: str,
     L.append("### Exact commands\n")
     L.append("```bash\npip install . -r benchmarks/requirements.txt   # builds the Rust engine (maturin)\n"
              f"{env['command']}\n"
-             f"python -m benchmarks.report {json_rel} -o benchmarks/RESULTS.md\n```\n")
+             f"python -m benchmarks.report {json_rel} -o benchmarks/RESULTS.md"
+             + "".join(f" \\\n    --compare {rel}" for _, rel in (compare or []))
+             + "\n```\n")
+    for old, rel in compare or []:
+        L.append(f"`{os.path.basename(rel)}` (Python engine) was produced by: "
+                 f"`{old['env']['command']}`\n")
 
     # -- setup -------------------------------------------------------------
     wd = cfg["workload_defaults"]
@@ -322,7 +331,8 @@ def render(res: dict[str, Any], json_rel: str,
     # pruning
     L.append("## Pruning (heapdb) and work per query\n")
     L.append("Means over the timed queries. *Events in window* is what brute force scores "
-             "(also the candidate set the SQL implementations filter to).\n")
+             "(also the candidate set the SQL implementations filter to); it is recorded by "
+             "the `bruteforce` implementation, so it is `-` where that did not run.\n")
     rows = []
     for n in sizes:
         h = next((r for r in lat if r["n_events"] == n and r["impl"] == "heapdb"
@@ -505,8 +515,18 @@ def render(res: dict[str, Any], json_rel: str,
         L.append(table(["method", *effs], rows))
         L.append("")
 
-    if compare is not None:
-        L.append(render_compare(res, compare[0], compare[1]))
+    if compare:
+        L.append("## Python engine vs Rust engine\n")
+        same = [c for c in compare if c[0]["env"].get("cpu_model") == env.get("cpu_model")]
+        if same and len(same) < len(compare):
+            L.append("The same-CPU comparison is the fair one; the other is the original "
+                     "Python-engine run, kept for reference.\n")
+        for old, rel in sorted(compare, key=lambda c: c[0]["env"].get("cpu_model")
+                               != env.get("cpu_model")):
+            same_cpu = old["env"].get("cpu_model") == env.get("cpu_model")
+            L.append(render_compare(res, old, rel,
+                                    "Same CPU (Python engine re-run)" if same_cpu
+                                    else "Original Python-engine run (different CPU)"))
 
     # -- reading -------------------------------------------------------------
     reading = os.path.join(HERE, "reading.md")
@@ -520,17 +540,18 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m benchmarks.report")
     ap.add_argument("results")
     ap.add_argument("-o", "--out", default=os.path.join(HERE, "RESULTS.md"))
-    ap.add_argument("--compare", default=None,
-                    help="older results JSON (Python engine) for a side-by-side section")
+    ap.add_argument("--compare", action="append", default=[],
+                    help="older results JSON (Python engine) for a side-by-side section; "
+                         "repeatable")
     args = ap.parse_args(argv)
     with open(args.results, encoding="utf-8") as fh:
         res = json.load(fh)
     root = os.path.dirname(HERE)
     rel = os.path.relpath(os.path.abspath(args.results), root)
-    compare = None
-    if args.compare:
-        with open(args.compare, encoding="utf-8") as fh:
-            compare = (json.load(fh), os.path.relpath(os.path.abspath(args.compare), root))
+    compare = []
+    for path in args.compare:
+        with open(path, encoding="utf-8") as fh:
+            compare.append((json.load(fh), os.path.relpath(os.path.abspath(path), root)))
     md = render(res, rel, compare)
     with open(args.out, "w", encoding="utf-8") as fh:
         fh.write(md)

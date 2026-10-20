@@ -633,9 +633,11 @@ Design direction (**not implemented** beyond `forget_entity`):
   build from source). `.pyi` stubs and `py.typed` ship with the package.
   CI runs `cargo fmt --check`, `clippy -D warnings`, `cargo test` and the
   pytest suite on Linux/macOS/Windows, and builds wheels on tags.
-- **Benchmarks.** These are re-run with the Rust engine, and a new
-  `bruteforce-rust` baseline (same Rust scoring, no pruning) is added. See
-  "Python engine vs Rust engine" in `benchmarks/RESULTS.md`.
+- **Benchmarks.** These are re-run with the Rust engine (now up to 10M
+  events), and a new `bruteforce-rust` baseline (same Rust scoring, no
+  pruning) is added. On the same CPU, query p50 is 8.5x-19.4x lower than the
+  pure-Python engine; see "Python engine vs Rust engine" in
+  `benchmarks/RESULTS.md` and the Benchmarks section below.
 - **Not ported.** There are no user-defined Python `Kernel` subclasses
   (kernels are the four built-in kinds). Python objects in `attrs` must be
   JSON values (tuples become lists).
@@ -744,51 +746,97 @@ Design direction (**not implemented** beyond `forget_entity`):
 
 [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md) has the full, reproducible
 results: query latency (p50/p95/p99) from 10K to 10M events for HeapDB,
-brute force with the same scoring code, SQLite and PostgreSQL (all checked
-to return identical top-k before timing), pruning, ingest, memory,
-sensitivity to kernels and bucket sizes, and ranking quality against a known
-ground truth. They were measured on one 2-vCPU VM and are synthetic, and this
-is a pure-Python engine competing with C-backed SQL engines, so read the
-"Reading these results" section there before quoting any number. Rerun with
-`pip install -r benchmarks/requirements.txt && python -m benchmarks.run`.
+brute force with the same Rust scoring code (`bruteforce-rust`), a Python
+brute-force loop, SQLite and PostgreSQL (all checked to return identical
+top-k before timing), pruning, ingest, memory, sensitivity to kernels and
+bucket sizes, ranking quality against a known ground truth, and the v0.4
+pure-Python engine against the v0.5 Rust engine. They were measured on one
+2-vCPU VM with synthetic data, so read the "Reading these results" section
+there before quoting any number. Rerun with
+`pip install . -r benchmarks/requirements.txt && python -m benchmarks.run`.
 
 A few lines copied verbatim from those tables. Latency in ms (p50, p95, p99,
 mean), default kernel:
 
 ```
-| 1M | `heapdb` | 1.98 | 3.24 | 4.05 | 2.16 | 50 (50 non-empty) |
-| 1M | `bruteforce` | 1.75 | 2.63 | 3.16 | 1.83 | 50 (50 non-empty) |
-| 1M | `sqlite-mem` | 1.55 | 2.00 | 2.76 | 1.59 | 50 (50 non-empty) |
-| 1M | `postgres` | 3.52 | 5.40 | 6.09 | 3.72 | 50 (50 non-empty) |
+| 10K | `heapdb` | 0.011 | 0.021 | 0.049 | 0.012 | 50 (50 non-empty) |
+| 10K | `bruteforce-rust` | 0.005 | 0.008 | 0.012 | 0.005 | 50 (50 non-empty) |
+| 10K | `sqlite-mem` | 0.025 | 0.043 | 0.064 | 0.026 | 50 (50 non-empty) |
+| 1M | `heapdb` | 0.107 | 0.167 | 0.200 | 0.120 | 50 (50 non-empty) |
+| 1M | `bruteforce-rust` | 0.119 | 0.157 | 0.173 | 0.125 | 50 (50 non-empty) |
+| 1M | `sqlite-mem` | 1.75 | 2.71 | 2.92 | 1.85 | 50 (50 non-empty) |
+| 1M | `postgres` | 4.04 | 4.70 | 6.20 | 4.11 | 50 (50 non-empty) |
+| 10M | `heapdb` | 0.514 | 0.602 | 0.634 | 0.517 | 50 (50 non-empty) |
+| 10M | `bruteforce-rust` | 0.789 | 1.15 | 1.21 | 0.830 | 50 (50 non-empty) |
+| 10M | `sqlite-mem` | 18.5 | 29.0 | 35.1 | 20.2 | 50 (50 non-empty) |
+| 10M | `postgres` | 63.5 | 129 | 174 | 72.0 | 50 (50 non-empty) |
 ```
 
-Pruning at 1M (events in window, heapdb events scored, scored p99, segments
-in window, segments pruned, pruned %):
+heapdb p50 relative to the others (other p50 / heapdb p50; below 1 means
+heapdb is slower; columns: N, heapdb p50, vs `bruteforce-rust`, vs
+`bruteforce`, vs `sqlite-mem`, vs `sqlite-disk`, vs `postgres`):
+
+```
+| 10K | 0.011 | 0.43x | 0.49x | 2.28x | 2.51x | 11.00x |
+| 100K | 0.026 | 0.81x | 1.85x | 7.09x | 7.05x | 20.33x |
+| 1M | 0.107 | 1.10x | 4.12x | 16.30x | 16.71x | 37.58x |
+| 10M | 0.514 | 1.54x | not measured | 35.93x | 35.89x | 123.58x |
+```
+
+Python engine (v0.4) vs Rust engine (v0.5), same CPU (columns: N, Python
+p50 ms, Rust p50 ms, p50 speed-up, Python p99 ms, Rust p99 ms, Python ingest
+ev/s, Rust ingest ev/s, ingest speed-up, Python RSS B/event, Rust RSS
+B/event):
+
+```
+| 10K | 0.092 | 0.011 | 8.5x | 0.294 | 0.049 | 75,809 | 328,630 | 4.3x | 2,415 | 808 |
+| 100K | 0.377 | 0.026 | 14.3x | 0.607 | 0.056 | 41,414 | 273,492 | 6.6x | 2,228 | 607 |
+| 1M | 2.08 | 0.107 | 19.4x | 3.75 | 0.200 | 42,969 | 357,197 | 8.3x | 1,502 | 298 |
+| 10M | not measured | 0.514 | - | not measured | 0.634 | not measured | 293,950 | - | not measured | 178 |
+```
+
+Pruning (events in window, heapdb events scored, scored p99, segments in
+window, segments pruned, pruned %):
 
 ```
 | 1M | 459.0 | 19.2 | 30 | 129.2 | 124.7 | 96.6% |
+| 10M | - | 149.6 | 250 | 133.3 | 129.0 | 96.8% |
 ```
 
-Where pruning fails: flat 24h window with all links equal (heapdb is slower;
-columns: events in window, heapdb scored, pruned %, heapdb p50, bruteforce
-p50, sqlite-mem p50, bruteforce / heapdb):
+Where pruning does not pay at 1M: a short kernel, and a flat 24h window with
+all links equal (columns: kernel, events in window, heapdb scored, pruned %,
+heapdb p50, [heapdb p99,] bruteforce-rust p50, bruteforce p50, sqlite-mem
+p50, bruteforce-rust / heapdb):
 
 ```
-| `window_24h` | 333.5 | 117.9 | 70.6% | 2.03 | 1.33 | 0.977 | 0.65x |
+| `exp_10m` | 23.3 | 9.4 | 63.8% | 0.015 | 0.040 | 0.011 | 0.031 | 0.089 | 0.72x |
+| `window_24h` | 333.5 | 117.9 | 70.6% | 0.073 | 0.072 | 0.397 | 1.14 | 0.98x |
+```
+
+Memory (ingest events/s, ingest s, index build s, RSS delta, storage):
+
+```
+| 1M | `heapdb` | 357,197 | 2.80 | 0.00 | 284 (298 B/event) | 279,021 segments |
+| 1M | `sqlite-mem` | 185,164 | 5.40 | 1.39 | 132 (139 B/event) | - |
+| 10M | `heapdb` | 293,950 | 34.02 | 0.00 | 1,701 (178 B/event) | 288,000 segments |
+| 10M | `sqlite-mem` | 173,499 | 57.64 | 20.55 | 1,331 (140 B/event) | - |
 ```
 
 Ranking quality, hit@1 of the true culprit (days 0-3.5, days 3.5-7, whole
-week; mean ± std over 20 seeds):
+week; mean ± std over 20 seeds; identical for both engines):
 
 ```
 | `recency` | 0.335 ± 0.097 | 0.411 ± 0.117 | 0.367 ± 0.070 |
 | `heapdb_proportional` | 0.536 ± 0.098 | 0.600 ± 0.111 | 0.562 ± 0.076 |
 ```
 
-In short: pruning cuts the events scored, but in this Python implementation
-it does not beat brute force or SQLite on wall time. HeapDB also ingests
-slower and uses more memory per event, which is why 10M events were not
-measured for it on this machine.
+In short: the Rust engine is 8-19x faster per query than the pure-Python
+engine, ingests 4-8x faster and uses about a fifth of the memory, with
+identical results. It is 16x faster than SQLite and 38x faster than
+PostgreSQL at 1M (36x and 124x at 10M). Against brute force over the same
+Rust store, pruning only pays off at larger N (1.10x at 1M, 1.54x at 10M);
+at 10K and 100K, and with very short or uninformative kernels, heapdb is
+slower or tied. SQLite still uses less memory per event.
 
 ## Roadmap
 
