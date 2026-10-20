@@ -1,6 +1,11 @@
 """Render a results JSON into markdown.
 
     python -m benchmarks.report benchmarks/results/<file>.json [-o benchmarks/RESULTS.md]
+        [--compare benchmarks/results/<older-run>.json]
+
+``--compare`` adds a "Python engine vs Rust engine" section that puts the
+``heapdb`` numbers of an older run (the v0.4 pure-Python engine) next to
+this run's.
 
 Every number in the output is copied from the JSON (only formatted). The
 hand-written "Reading these results" text lives in
@@ -20,7 +25,7 @@ from typing import Any
 from .workload import size_label
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-IMPL_ORDER = ("heapdb", "bruteforce", "sqlite-mem", "sqlite-disk", "postgres")
+IMPL_ORDER = ("heapdb", "bruteforce-rust", "bruteforce", "sqlite-mem", "sqlite-disk", "postgres")
 KERNEL_DESC = {
     "lognormal_3h": "log-normal median 3h, sigma 0.6 (support 33h; default)",
     "exp_10m": "exponential, half-life 10 min (support 100 min)",
@@ -85,7 +90,104 @@ def _status(r: dict[str, Any]) -> str | None:
     return None
 
 
-def render(res: dict[str, Any], json_rel: str) -> str:
+def render_compare(new: dict[str, Any], old: dict[str, Any], old_rel: str) -> str:
+    """Python engine (older run) vs Rust engine (this run), heapdb only."""
+    L: list[str] = []
+    oe, ne = old["env"], new["env"]
+    L.append("## Python engine vs Rust engine\n")
+    L.append(f"`heapdb` rows of the v0.4 pure-Python engine (from "
+             f"[`{os.path.basename(old_rel)}`](results/{os.path.basename(old_rel)}), git "
+             f"`{(oe.get('git_sha') or '')[:7]}`, {oe['date_utc']}, host `{oe['host']}`) next "
+             f"to this run's Rust engine (git `{(ne.get('git_sha') or '')[:7]}`, host "
+             f"`{ne['host']}`). Same workload generator, seed, queries and kernel; the "
+             "Python engine's `bruteforce` used Python scoring, this run's uses Rust scoring. "
+             "Speed-up = Python / Rust.\n")
+    k = new["config"]["default_kernel"]
+
+    def get(res, impl, n):
+        return next((r for r in res["latency"] if r["impl"] == impl and r["n_events"] == n
+                     and not _status(r)), None)
+
+    rows = []
+    sizes = sorted({r["n_events"] for r in new["latency"]} | {r["n_events"] for r in old["latency"]})
+    for n in sizes:
+        o, w = get(old, "heapdb", n), get(new, "heapdb", n)
+        ox, wx = (_run(o, k) if o else None), (_run(w, k) if w else None)
+
+        def lat(x, key):
+            return x["latency"][key] if x and "latency" in x else None
+
+        def sp(a, b):
+            return "-" if a is None or b is None or b == 0 else f"{a / b:.1f}x"
+
+        def bpe(r):
+            if not r or r.get("rss_delta_bytes") is None:
+                return None
+            return r["rss_delta_bytes"] / r["n_events"]
+
+        status_o = "not measured" if o is None else None
+        status_w = "not measured" if w is None else None
+        rows.append([
+            size_label(n),
+            status_o or ms(lat(ox, "p50_ms")), status_w or ms(lat(wx, "p50_ms")),
+            sp(lat(ox, "p50_ms"), lat(wx, "p50_ms")),
+            status_o or ms(lat(ox, "p99_ms")), status_w or ms(lat(wx, "p99_ms")),
+            status_o or num(o["ingest_events_per_s"]) if o else "not measured",
+            num(w["ingest_events_per_s"]) if w else "not measured",
+            sp(w["ingest_events_per_s"] if w else None, o["ingest_events_per_s"] if o else None),
+            num(bpe(o)) if o else "not measured", num(bpe(w)) if w else "not measured",
+        ])
+    L.append(table(["N", "Python p50 ms", "Rust p50 ms", "p50 speed-up", "Python p99 ms",
+                    "Rust p99 ms", "Python ingest ev/s", "Rust ingest ev/s", "ingest speed-up",
+                    "Python RSS B/event", "Rust RSS B/event"], rows))
+    L.append("")
+    # Sensitivity kernels at the sensitivity size, heapdb p50.
+    osens, nsens = old.get("sensitivity") or [], new.get("sensitivity") or []
+
+    def spick(sens, impl, bucket, links):
+        return next((r for r in sens if r["impl"] == impl and r["bucket_seconds"] == bucket
+                     and r["links"] == links and not _status(r)), None)
+    if osens and nsens and osens[0]["n_events"] == nsens[0]["n_events"]:
+        b15 = new["config"]["default_bucket"]
+        o, w = spick(osens, "heapdb", b15, "skewed"), spick(nsens, "heapdb", b15, "skewed")
+        if o and w:
+            L.append(f"heapdb p50 by kernel at {size_label(nsens[0]['n_events'])} events "
+                     "(15 min buckets, skewed links), ms:\n")
+            rows = []
+            for x in w.get("runs", []):
+                kn = x["kernel"]
+                ox = _run(o, kn)
+                if not ox or "latency" not in ox or "latency" not in x:
+                    continue
+                rows.append([f"`{kn}`", ms(ox["latency"]["p50_ms"]), ms(x["latency"]["p50_ms"]),
+                             f"{ox['latency']['p50_ms'] / x['latency']['p50_ms']:.1f}x",
+                             num(ox.get("events_scored_mean"), 1), num(x.get("events_scored_mean"), 1)])
+            L.append(table(["kernel", "Python p50", "Rust p50", "speed-up",
+                            "Python events scored", "Rust events scored"], rows))
+            L.append("")
+    oq, nq = old.get("quality"), new.get("quality")
+    if oq and nq and oq.get("seeds") == nq.get("seeds"):
+        diffs = []
+        for m, per in nq["by_period"].items():
+            for p, vals in per.items():
+                for k2 in ("hit1", "hit3", "mrr"):
+                    try:
+                        a, b = oq["by_period"][m][p][k2]["mean"], vals[k2]["mean"]
+                    except KeyError:
+                        continue
+                    if abs(a - b) > 1e-12:
+                        diffs.append(f"`{m}` {p} {k2} {a:.3f} -> {b:.3f}")
+        if not diffs:
+            L.append("Ranking quality (same simulation, same seeds): identical to the Python "
+                     "engine's numbers in every cell.\n")
+        else:
+            L.append("Ranking quality (same simulation, same seeds) differs from the Python "
+                     f"engine's numbers in {len(diffs)} cell(s): " + "; ".join(diffs) + ".\n")
+    return "\n".join(L)
+
+
+def render(res: dict[str, Any], json_rel: str,
+           compare: tuple[dict[str, Any], str] | None = None) -> str:
     env, cfg = res["env"], res["config"]
     L: list[str] = []
     L.append("# HeapDB benchmark results\n")
@@ -104,6 +206,8 @@ def render(res: dict[str, Any], json_rel: str) -> str:
         ["RAM", "-" if ram is None else f"{ram / 2**30:.1f} GiB"],
         ["OS", env["os"]],
         ["Python", f"{env['python']} ({env['python_implementation']})"],
+        ["heapdb", env.get("heapdb") or "-"],
+        ["Rust", env.get("rustc") or "-"],
         ["SQLite", env["sqlite_version"]],
         ["PostgreSQL", res["postgres"]["description"] if res.get("postgres") else "-"],
         ["psutil / psycopg", f"{env.get('psutil') or '-'} / {env.get('psycopg') or '-'}"],
@@ -116,7 +220,7 @@ def render(res: dict[str, Any], json_rel: str) -> str:
              "code itself was untracked at that point if it was added in the same commit as "
              "the results; the `heapdb` library code is that of the recorded sha.\n")
     L.append("### Exact commands\n")
-    L.append("```bash\npip install -e . && pip install -r benchmarks/requirements.txt\n"
+    L.append("```bash\npip install . -r benchmarks/requirements.txt   # builds the Rust engine (maturin)\n"
              f"{env['command']}\n"
              f"python -m benchmarks.report {json_rel} -o benchmarks/RESULTS.md\n```\n")
 
@@ -144,10 +248,16 @@ def render(res: dict[str, Any], json_rel: str) -> str:
         f"within {cfg['tolerance']:g} (relative) and ids must match except for permutations "
         "within tied scores. A mismatch aborts that run and is reported as an error.\n"
         "* **Implementations** (`benchmarks/impls.py`):\n"
-        "  * `heapdb`: `HeapDB.top_causes` (segment bounds, best-first scan, early stop).\n"
-        "  * `bruteforce`: the same `Event` objects and the same `HeapDB.score` function on "
-        "every event in the kernel window (bisect on a per-entity time array), then "
-        "`heapq.nlargest`. Only the search strategy differs from `heapdb`.\n"
+        "  * `heapdb`: `HeapDB.top_causes` (segment bounds, best-first scan, early stop), "
+        "called from Python; since v0.5 the engine is Rust (PyO3 bindings), so latency "
+        "includes the Python call and building the result objects.\n"
+        "  * `bruteforce-rust`: `HeapDB.top_causes_naive`: the same Rust engine and scoring "
+        "code scores every event in the segments overlapping the window, full sort. No "
+        "bounds and no pruning: only the search strategy differs from `heapdb`.\n"
+        "  * `bruteforce`: Python `Event` objects in per-entity time arrays (bisect), the "
+        "`HeapDB.score` function on every event in the kernel window from a Python loop, "
+        "then `heapq.nlargest`. Since v0.5 each `score` call goes into the Rust engine, so "
+        "this measures a Python loop over a Rust function.\n"
         "  * `sqlite-mem` / `sqlite-disk`: stdlib `sqlite3`, `events(id, entity, time, "
         "weight)` + `event_features(event_id, feature)` + temp table `links(feature, "
         "ln(1-s))`, index on `events(entity, time)`. **All scoring runs in SQL**: window "
@@ -281,21 +391,25 @@ def render(res: dict[str, Any], json_rel: str) -> str:
             return next((r for r in sens if r["impl"] == impl and r["bucket_seconds"] == bucket
                          and r["links"] == links), None)
         b15 = cfg["default_bucket"]
+        def p50(x):
+            return ms(x["latency"]["p50_ms"]) if x and "latency" in x else "-"
+
         for kn in kernels:
-            h, b, s = (pick(i, b15, "skewed") for i in ("heapdb", "bruteforce", "sqlite-mem"))
-            hx, bx, sx = (_run(r, kn) if r and not _status(r) else None for r in (h, b, s))
+            h, br, b, s = (pick(i, b15, "skewed") for i in
+                           ("heapdb", "bruteforce-rust", "bruteforce", "sqlite-mem"))
+            hx, brx, bx, sx = (_run(r, kn) if r and not _status(r) else None
+                               for r in (h, br, b, s))
             if not hx or "latency" not in hx:
                 continue
-            ratio = (bx["latency"]["p50_ms"] / hx["latency"]["p50_ms"]) if bx and "latency" in bx else None
+            ratio = (brx["latency"]["p50_ms"] / hx["latency"]["p50_ms"]) if brx and "latency" in brx else None
             rows.append([f"`{kn}`", num(bx.get("events_in_window_mean") if bx else None, 1),
                          num(hx["events_scored_mean"], 1), pct(hx["segments_pruned_fraction"]),
                          ms(hx["latency"]["p50_ms"]), ms(hx["latency"]["p99_ms"]),
-                         ms(bx["latency"]["p50_ms"]) if bx and "latency" in bx else "-",
-                         ms(sx["latency"]["p50_ms"]) if sx and "latency" in sx else "-",
+                         p50(brx), p50(bx), p50(sx),
                          "-" if ratio is None else f"{ratio:.2f}x"])
         L.append(table(["kernel", "events in window", "heapdb scored", "pruned %",
-                        "heapdb p50", "heapdb p99", "bruteforce p50", "sqlite-mem p50",
-                        "bruteforce / heapdb"], rows))
+                        "heapdb p50", "heapdb p99", "bruteforce-rust p50", "bruteforce p50",
+                        "sqlite-mem p50", "bruteforce-rust / heapdb"], rows))
         L.append("\nKernels: " + "; ".join(f"`{k}` = {KERNEL_DESC[k]}" for k in kernels
                                            if k in KERNEL_DESC) + ". Latency in ms.\n")
 
@@ -334,20 +448,20 @@ def render(res: dict[str, Any], json_rel: str) -> str:
                  "on top of scoring.\n")
         rows = []
         for kn in ("lognormal_3h", "window_24h"):
-            h, b, s = (pick(i, b15, "flat") for i in ("heapdb", "bruteforce", "sqlite-mem"))
-            hx, bx, sx = (_run(r, kn) if r and not _status(r) else None for r in (h, b, s))
+            h, br, b, s = (pick(i, b15, "flat") for i in
+                           ("heapdb", "bruteforce-rust", "bruteforce", "sqlite-mem"))
+            hx, brx, bx, sx = (_run(r, kn) if r and not _status(r) else None
+                               for r in (h, br, b, s))
             if not hx or "latency" not in hx:
                 continue
-            ratio = (bx["latency"]["p50_ms"] / hx["latency"]["p50_ms"]) if bx and "latency" in bx else None
+            ratio = (brx["latency"]["p50_ms"] / hx["latency"]["p50_ms"]) if brx and "latency" in brx else None
             rows.append([f"`{kn}`", num(bx.get("events_in_window_mean") if bx else None, 1),
                          num(hx["events_scored_mean"], 1), pct(hx["segments_pruned_fraction"]),
-                         ms(hx["latency"]["p50_ms"]),
-                         ms(bx["latency"]["p50_ms"]) if bx and "latency" in bx else "-",
-                         ms(sx["latency"]["p50_ms"]) if sx and "latency" in sx else "-",
+                         ms(hx["latency"]["p50_ms"]), p50(brx), p50(bx), p50(sx),
                          "-" if ratio is None else f"{ratio:.2f}x"])
         L.append(table(["kernel", "events in window", "heapdb scored", "pruned %",
-                        "heapdb p50", "bruteforce p50", "sqlite-mem p50",
-                        "bruteforce / heapdb"], rows))
+                        "heapdb p50", "bruteforce-rust p50", "bruteforce p50", "sqlite-mem p50",
+                        "bruteforce-rust / heapdb"], rows))
         L.append("")
         errs = [r for r in sens if _status(r)]
         for r in errs:
@@ -391,6 +505,9 @@ def render(res: dict[str, Any], json_rel: str) -> str:
         L.append(table(["method", *effs], rows))
         L.append("")
 
+    if compare is not None:
+        L.append(render_compare(res, compare[0], compare[1]))
+
     # -- reading -------------------------------------------------------------
     reading = os.path.join(HERE, "reading.md")
     if os.path.exists(reading):
@@ -403,12 +520,18 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m benchmarks.report")
     ap.add_argument("results")
     ap.add_argument("-o", "--out", default=os.path.join(HERE, "RESULTS.md"))
+    ap.add_argument("--compare", default=None,
+                    help="older results JSON (Python engine) for a side-by-side section")
     args = ap.parse_args(argv)
     with open(args.results, encoding="utf-8") as fh:
         res = json.load(fh)
     root = os.path.dirname(HERE)
     rel = os.path.relpath(os.path.abspath(args.results), root)
-    md = render(res, rel)
+    compare = None
+    if args.compare:
+        with open(args.compare, encoding="utf-8") as fh:
+            compare = (json.load(fh), os.path.relpath(os.path.abspath(args.compare), root))
+    md = render(res, rel, compare)
     with open(args.out, "w", encoding="utf-8") as fh:
         fh.write(md)
     print(f"wrote {args.out}", file=sys.stderr)

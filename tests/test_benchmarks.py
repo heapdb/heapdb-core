@@ -43,7 +43,7 @@ def _check(impl_name, wl, kernel_names, **opts):
 
 
 @pytest.mark.parametrize("spec", SPECS, ids=["skewed", "flat"])
-@pytest.mark.parametrize("impl", ["heapdb", "bruteforce", "sqlite-mem", "sqlite-disk"])
+@pytest.mark.parametrize("impl", ["heapdb", "bruteforce-rust", "bruteforce", "sqlite-mem", "sqlite-disk"])
 def test_impls_agree(impl, spec):
     _check(impl, generate(spec), list(KERNEL_NAMES))
 

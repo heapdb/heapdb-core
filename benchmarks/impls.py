@@ -18,8 +18,14 @@ Implementations
                        (``HeapDB.score``, i.e. heapdb's kernel + noisy-OR
                        link code) applied to every event in the kernel window
                        (found with ``bisect`` on a per-entity time array),
-                       then ``heapq.nlargest``. Only the search strategy
-                       differs from ``heapdb``.
+                       then ``heapq.nlargest``. Since v0.5 the scoring
+                       function is the Rust engine's, called once per event
+                       from this Python loop.
+* ``bruteforce-rust`` -- ``HeapDB.top_causes_naive``: inside the Rust
+                       engine, score every event of the entity's segments
+                       overlapping the window (same scoring code as
+                       ``heapdb``), full sort, cut. No bounds, no pruning:
+                       only the search strategy differs from ``heapdb``.
 * ``sqlite-mem`` / ``sqlite-disk`` -- stdlib ``sqlite3``. Tables
                        ``events(id, entity, time, weight)``,
                        ``event_features(event_id, feature)`` and a temp table
@@ -172,6 +178,18 @@ class BruteForceImpl(Impl):
             if s > 0.0:
                 scored.append((s, ev.id))
         return heapq.nlargest(k, scored)
+
+
+class BruteForceRustImpl(HeapDBImpl):
+    """Same Rust engine and data as ``heapdb``; queries skip the bounds and
+    scan the whole window (``HeapDB.top_causes_naive``)."""
+
+    name = "bruteforce-rust"
+
+    def query(self, entity: int, at: float, k: int) -> Result:
+        out = self.db.top_causes_naive(self.wl.entities[entity], self.effect, at, k=k)
+        self.last_stats = None
+        return [(s, ev.id) for s, ev in out]
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +396,7 @@ class PostgresImpl(_SQLBase):
 IMPLS: dict[str, type[Impl]] = {
     "heapdb": HeapDBImpl,
     "bruteforce": BruteForceImpl,
+    "bruteforce-rust": BruteForceRustImpl,
     "sqlite-mem": SQLiteImpl,
     "sqlite-disk": SQLiteImpl,
     "postgres": PostgresImpl,

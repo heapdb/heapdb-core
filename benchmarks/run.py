@@ -48,8 +48,8 @@ from .workload import (DEFAULT_BUCKET, DEFAULT_KERNEL, KERNEL_NAMES, M, SIZES, W
                        parse_size, size_label)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LATENCY_IMPLS = ("heapdb", "bruteforce", "sqlite-mem", "sqlite-disk", "postgres")
-SENS_IMPLS = ("heapdb", "bruteforce", "sqlite-mem")
+LATENCY_IMPLS = ("heapdb", "bruteforce-rust", "bruteforce", "sqlite-mem", "sqlite-disk", "postgres")
+SENS_IMPLS = ("heapdb", "bruteforce-rust", "bruteforce", "sqlite-mem")
 BUCKETS = (5 * M, 15 * M, 60 * M)
 TOL = 1e-9
 
@@ -102,6 +102,22 @@ def _git(*args: str) -> str | None:
         return None
 
 
+def _heapdb_version() -> str | None:
+    try:
+        import heapdb
+        engine = "rust" if hasattr(heapdb, "_core") else "python"
+        return f"{heapdb.__version__} ({engine} engine)"
+    except Exception:  # pragma: no cover
+        return None
+
+
+def _cmd(args: list[str]) -> str | None:
+    try:
+        return subprocess.run(args, capture_output=True, text=True, check=True).stdout.strip()
+    except Exception:
+        return None
+
+
 def environment(argv: list[str]) -> dict[str, Any]:
     import sqlite3
     try:
@@ -122,6 +138,8 @@ def environment(argv: list[str]) -> dict[str, Any]:
         "cpu_count_logical": os.cpu_count(),
         "ram_bytes": _ram_bytes(),
         "python": sys.version.split()[0],
+        "heapdb": _heapdb_version(),
+        "rustc": _cmd(["rustc", "--version"]),
         "python_implementation": platform.python_implementation(),
         "os": platform.platform(),
         "sqlite_version": sqlite3.sqlite_version,

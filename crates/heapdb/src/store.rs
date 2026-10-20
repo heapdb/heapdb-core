@@ -1512,7 +1512,8 @@ impl HeapDB {
     }
 
     /// Reference brute force: score every event of the entity in the
-    /// window, sort, cut. For testing.
+    /// window (no bounds, no pruning), sort, cut. For testing and as a
+    /// benchmark baseline.
     pub fn top_causes_naive(
         &self,
         entity: &str,
@@ -1531,7 +1532,10 @@ impl HeapDB {
         };
         let mut cache = StrengthCache::new(EntityRef::Entity(Some(eid)));
         let mut scored = Vec::new();
-        for ord in log.ords_in_order() {
+        let ords = log
+            .segments_between(t_lo, t_hi)
+            .flat_map(|s| s.ords.iter().copied());
+        for ord in ords {
             let ev = &log.events[ord as usize];
             if !(t_lo <= ev.time && ev.time <= t_hi) {
                 continue;
