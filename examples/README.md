@@ -1,12 +1,13 @@
 # Examples
 
-Both scripts are self-contained (stdlib only) and put the repository root on
+All scripts are self-contained (stdlib only) and put the repository root on
 `sys.path`, so you can run them from a fresh checkout:
 
 ```bash
 python examples/bloating.py
 python examples/incident_rca.py
 python examples/code_changes.py
+python examples/product_analytics.py
 ```
 
 ## `bloating.py`: personal health, learning from feedback
@@ -81,3 +82,24 @@ second. It shows:
   risk. The same query is also run as `RISK OF incident FOR payments FEATURES ...`.
   Links are per-feature, so interactions are learned only through their
   members. The script points out where that misleads the queue.
+
+## `product_analytics.py`: observational learning, no feedback at all
+
+1,200 synthetic users over about two months. Each user sits in a feature-flag
+variant (`flag:new-editor=test|control`), visits pages (some
+`/settings/billing` loads are `perf:slow`), completes or skips onboarding,
+uses the editor, invites teammates, exports, and sometimes hits an
+exception. Hidden noisy-OR ground truth produces `rage_click` (exponential
+kernel, 2 min half-life), `converted` (log-normal, median 1 day) and
+`churned` (log-normal, median 14 days). Nobody labels causes: occurrences go
+to `observe()` and the rest is handled by `settle()`. Runs in about 1 s. It
+shows:
+
+- **`link_report` per effect** with 90% credible intervals and lift, next to
+  the hidden truth. Every true cause ranks above every null feature.
+- **The confounder caveat.** Power users export a lot and convert more for
+  unrelated reasons, so `event:used_export` appears as a conversion
+  association although it has no effect.
+- **One-shot effects.** `repeatable=False` for `converted` and `churned`.
+- **"Why did this user churn?"** `top_causes(..., explain=True)` for one
+  churned user.

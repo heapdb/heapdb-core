@@ -45,6 +45,7 @@ The result is exactly the brute-force top-k (up to ties); see
 
 from __future__ import annotations
 
+import bisect
 import heapq
 import json
 import math
@@ -54,8 +55,9 @@ from typing import Any, Callable, Iterable, Iterator, Mapping
 
 from .events import Event, as_feature_set, validate_weight
 from .kernels import Kernel, kernel_from_dict
-from .links import CREDIT_MODES, BetaCounts, LinkTable, _fmt
+from .links import CREDIT_MODES, BetaCounts, LinkTable, _fmt, responsibilities
 from .segments import DEFAULT_MAX_SETS, EntityLog, Segment
+from .stats import beta_interval
 
 # Relative slack applied to segment bounds before comparing them with real
 # scores. Mathematically bound >= score; this guards against last-bit floating
@@ -63,7 +65,10 @@ from .segments import DEFAULT_MAX_SETS, EntityLog, Segment
 # order), so we never prune an event we should have kept.
 _BOUND_SLACK = 1e-9
 
-SNAPSHOT_VERSION = 2
+SNAPSHOT_VERSION = 3
+
+#: Default background (leak) score of an effect for :meth:`HeapDB.observe`.
+DEFAULT_LEAK = 0.05
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +119,29 @@ class EffectSpec:
     credit: str = "proportional"
     #: Names of predicate rules found in a snapshot that must be re-registered.
     pending_rules: list[str] = field(default_factory=list)
+    #: v0.4 observational learning: background score of the effect, i.e. the
+    #: "happened for no event in the window" alternative in :meth:`HeapDB.observe`.
+    leak: float = DEFAULT_LEAK
+    #: v0.4: negative evidence per feature added by :meth:`HeapDB.settle` for an
+    #: event whose window passed without the effect.
+    w_neg: float = 1.0
+    #: v0.4: False for one-shot effects (churn, first conversion): once an
+    #: entity has had the effect, :meth:`HeapDB.settle` does not add negative
+    #: evidence for its later events (they could not have caused it again).
+    repeatable: bool = True
+    #: v0.4: observational bookkeeping (occurrences, credited/rejected events,
+    #: settle cursors). See :class:`ObservationState`.
+    obs: "ObservationState" = field(default_factory=lambda: ObservationState())
+
+    def rule_multiplier(self, event: Event) -> float:
+        """Product of the multipliers of the rules matching ``event``."""
+        m = 1.0
+        for r in self.rules:
+            if m == 0.0:
+                break
+            if r.matches(event):
+                m *= r.multiplier
+        return m
 
     def rule_bound(self, type_: str) -> float:
         """Upper bound of the rule product for any event of ``type_``."""
@@ -125,6 +153,184 @@ class EffectSpec:
 
     def type_allowed(self, type_: str) -> bool:
         return self.cause_types is None or type_ in self.cause_types
+
+
+@dataclass
+class ObservationState:
+    """Per-effect state of observational learning (v0.4).
+
+    * ``occurrences``: entity -> sorted times at which the effect was observed
+      with :meth:`HeapDB.observe` (no labelled cause).
+    * ``credited``: event id -> total soft responsibility the event received
+      from observed occurrences. Credited events are never rejected by
+      :meth:`HeapDB.settle` for this effect.
+    * ``rejected``: event id -> negative evidence weight added by ``settle``.
+      If an occurrence is observed later in the event's window, ``observe``
+      undoes that rejection before crediting (order independence).
+    * ``cursors``: entity -> event-time watermark; every event with
+      ``time <= cursor`` has been settled. ``late``: entity -> ids of events
+      inserted at or before the cursor (settled on the next call).
+    * ``stats``: running counters (see :meth:`HeapDB.observation_stats`).
+    """
+
+    occurrences: dict[str, list[float]] = field(default_factory=dict)
+    credited: dict[int, float] = field(default_factory=dict)
+    rejected: dict[int, float] = field(default_factory=dict)
+    cursors: dict[str, float] = field(default_factory=dict)
+    late: dict[str, list[int]] = field(default_factory=dict)
+    stats: dict[str, float] = field(default_factory=lambda: dict(_EMPTY_OBS_STATS))
+
+    def to_dict(self) -> dict:
+        return {
+            "occurrences": {e: ts for e, ts in sorted(self.occurrences.items())},
+            "credited": {str(k): v for k, v in sorted(self.credited.items())},
+            "rejected": {str(k): v for k, v in sorted(self.rejected.items())},
+            "cursors": dict(sorted(self.cursors.items())),
+            "late": {e: ids for e, ids in sorted(self.late.items()) if ids},
+            "stats": dict(self.stats),
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict | None) -> "ObservationState":
+        st = cls()
+        if not d:
+            return st
+        st.occurrences = {e: sorted(float(t) for t in ts) for e, ts in d.get("occurrences", {}).items()}
+        st.credited = {int(k): float(v) for k, v in d.get("credited", {}).items()}
+        st.rejected = {int(k): float(v) for k, v in d.get("rejected", {}).items()}
+        st.cursors = {e: float(t) for e, t in d.get("cursors", {}).items()}
+        st.late = {e: [int(i) for i in ids] for e, ids in d.get("late", {}).items()}
+        st.stats.update({k: float(v) for k, v in d.get("stats", {}).items()})
+        return st
+
+
+_EMPTY_OBS_STATS = {
+    "occurrences": 0.0,          # observe() calls
+    "leak_responsibility": 0.0,  # sum over occurrences of leak / (leak + sum scores)
+    "credited_mass": 0.0,        # sum over occurrences of 1 - leak responsibility
+    "events_settled": 0.0,       # events whose window was examined by settle()
+    "events_rejected": 0.0,      # ... that received negative evidence
+    "rejected_weight": 0.0,      # total negative evidence weight (per event)
+    "skipped_credited": 0.0,     # ... skipped because they had soft credit
+    "skipped_observed": 0.0,     # ... skipped: an occurrence fell in their window
+    "skipped_terminal": 0.0,     # ... skipped: after a one-shot effect occurred
+    "rejections_undone": 0.0,    # rejections reversed by a late observe()
+}
+
+
+@dataclass(frozen=True)
+class EventCredit:
+    """Soft credit one candidate event received from :meth:`HeapDB.observe`."""
+
+    event_id: int
+    score: float
+    responsibility: float           # r_e = score / (leak + sum of scores)
+    features: Mapping[str, float]   # feature -> alpha added (r_e * share_f)
+
+    def __str__(self) -> str:
+        fs = ", ".join(f"{f}+{a:.3f}" for f, a in sorted(self.features.items(),
+                                                           key=lambda kv: -kv[1]))
+        return f"#{self.event_id} score={self.score:.4f} r={self.responsibility:.3f} [{fs}]"
+
+
+@dataclass(frozen=True)
+class ObserveReport:
+    """What :meth:`HeapDB.observe` did for one effect occurrence."""
+
+    entity: str
+    effect: str
+    at: float
+    leak: float
+    leak_responsibility: float      # leak / (leak + sum of scores)
+    credits: tuple[EventCredit, ...]  # sorted by responsibility, desc
+
+    @property
+    def total_credit(self) -> float:
+        """Sum of the events' responsibilities (= 1 - leak responsibility)."""
+        return sum(c.responsibility for c in self.credits)
+
+    def __str__(self) -> str:
+        lines = [f"Observed '{self.effect}' for {self.entity} at t={self.at:g}: "
+                 f"{len(self.credits)} candidate(s), leak {self.leak:g} took "
+                 f"{self.leak_responsibility:.1%}"]
+        lines += [f"  {c}" for c in self.credits]
+        return "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class SettleReport:
+    """What :meth:`HeapDB.settle` did (summed over effects and entities)."""
+
+    until: float
+    events_settled: int
+    events_rejected: int
+    rejected_weight: float
+    skipped_credited: int
+    skipped_observed: int  # effect observed in the window, or after a one-shot effect
+    per_effect: Mapping[str, int]  # effect -> events rejected
+
+    def __str__(self) -> str:
+        return (f"Settled until t={self.until:g}: {self.events_settled} event(s) examined, "
+                f"{self.events_rejected} rejected (weight {self.rejected_weight:.2f}), "
+                f"{self.skipped_credited} skipped (had soft credit), "
+                f"{self.skipped_observed} skipped (effect observed in window)")
+
+
+@dataclass(frozen=True)
+class LinkRow:
+    """One feature in a :class:`LinkReport`."""
+
+    feature: str
+    strength: float          # posterior mean alpha / (alpha + beta)
+    alpha: float
+    beta: float
+    n: float                 # effective evidence (excludes the prior)
+    lo: float                # credible interval lower bound
+    hi: float                # credible interval upper bound
+    lift: float              # strength / baseline
+
+
+@dataclass(frozen=True)
+class LinkReport:
+    """Features ranked by learned link strength for one effect.
+
+    These are **associations under the model** (noisy-OR links learned from
+    feedback and/or observation), *not* causal effects: features that merely
+    co-occur with true causes (confounders, selection effects) can rank high.
+    """
+
+    effect: str
+    entity: str | None
+    baseline: float
+    level: float
+    rows: tuple[LinkRow, ...]
+
+    def __iter__(self) -> Iterator[LinkRow]:
+        return iter(self.rows)
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+    def row(self, feature: str) -> LinkRow | None:
+        for r in self.rows:
+            if r.feature == feature:
+                return r
+        return None
+
+    def __str__(self) -> str:
+        who = self.entity if self.entity is not None else "(global)"
+        pct = f"{self.level:.0%}"
+        lines = [f"Links of '{self.effect}' for {who} (baseline {self.baseline:.3f}; "
+                 f"associations under the model, not causal effects):",
+                 f"  {'feature':<36} {'mean':>6} {pct + ' CI':>15} {'lift':>6} "
+                 f"{'n':>8} {'alpha':>8} {'beta':>8}"]
+        for r in self.rows:
+            lines.append(f"  {r.feature:<36} {r.strength:>6.3f} "
+                         f"[{r.lo:.3f}, {r.hi:.3f}] {r.lift:>6.2f} {r.n:>8.1f} "
+                         f"{r.alpha:>8.2f} {r.beta:>8.2f}")
+        if not self.rows:
+            lines.append("  (no features with enough support)")
+        return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -484,6 +690,9 @@ class HeapDB:
         credit: str = "proportional",
         global_pseudocount: float = 5.0,
         hierarchical: bool = True,
+        leak: float = DEFAULT_LEAK,
+        w_neg: float = 1.0,
+        repeatable: bool = True,
     ) -> EffectSpec:
         """Declare an effect type, its lag kernel and its link priors.
 
@@ -494,9 +703,20 @@ class HeapDB:
         or v0.1 "uniform"). ``global_pseudocount`` caps how much an entity
         borrows from evidence pooled across entities; ``hierarchical=False``
         disables borrowing for this effect.
+
+        Observational learning (v0.4): ``leak`` is the effect's background
+        score in :meth:`observe` -- the weight of "it happened for no event in
+        the window" (> 0; larger = more sceptical, slower learning).
+        ``w_neg`` is the negative evidence per feature that :meth:`settle`
+        adds for an event whose window passed without the effect (>= 0).
+        ``repeatable=False`` marks a one-shot effect (churn, first
+        conversion): ``settle`` then ignores an entity's events from its first
+        observed occurrence on, since they could not have caused it again.
         """
         if credit not in CREDIT_MODES:
             raise ValueError(f"credit must be one of {CREDIT_MODES}, got {credit!r}")
+        leak = _check_leak(leak)
+        w_neg = _check_w_neg(w_neg)
         spec = EffectSpec(
             name=name,
             kernel=kernel,
@@ -505,6 +725,9 @@ class HeapDB:
                             hierarchical=hierarchical),
             cause_types=frozenset(cause_types) if cause_types else None,
             credit=credit,
+            leak=leak,
+            w_neg=w_neg,
+            repeatable=bool(repeatable),
         )
         self._effects[name] = spec
         return spec
@@ -606,6 +829,12 @@ class HeapDB:
                                                     self.max_sets_per_segment)
         log.add(ev)
         self._events[ev.id] = ev
+        # Observational learning: an event arriving behind a settle cursor is
+        # queued so the next settle() still examines it.
+        for spec in self._effects.values():
+            cur = spec.obs.cursors.get(ev.entity)
+            if cur is not None and ev.time <= cur:
+                spec.obs.late.setdefault(ev.entity, []).append(ev.id)
 
     # -- reads --------------------------------------------------------------
 
@@ -1134,6 +1363,280 @@ class HeapDB:
         return FeedbackReport(confirmed.id if confirmed else None,
                               tuple(r.id for r in rejected), credit_map)
 
+    # -- observational learning (v0.4) ----------------------------------------
+
+    def _window_events(self, spec: EffectSpec, entity: str, at: float) -> list[Event]:
+        log = self._logs.get(entity)
+        if log is None:
+            return []
+        t_lo, t_hi = self._window(spec, at, None)
+        return [ev for seg in log.segments_between(t_lo, t_hi) for ev in seg.events
+                if t_lo <= ev.time <= t_hi]
+
+    def _shares(self, spec: EffectSpec, ev: Event) -> dict[str, float]:
+        """Per-feature share of an event's credit (mirrors :meth:`feedback`)."""
+        if spec.credit == "uniform":
+            return {f: 1.0 for f in ev.features}
+        return responsibilities(spec.links.strengths(sorted(ev.features), ev.entity))
+
+    def observe(self, entity: str, effect: str, at: float,
+                leak: float | None = None) -> ObserveReport:
+        """Record an occurrence of ``effect`` with **no labelled cause**.
+
+        Observational (implicit) learning by one soft-EM step. Every candidate
+        event ``e`` in the kernel window is scored exactly as in
+        :meth:`top_causes` (kernel x dose x noisy-OR links x rules) and gets
+        the responsibility::
+
+            r_e = score_e / (leak + sum_e' score_e')
+
+        where ``leak`` (default: the effect's ``leak``) is the background
+        rate: "it happened for no event in the window". Each feature of ``e``
+        then gets proportional credit scaled by ``r_e`` --
+        ``alpha_f += r_e * share_f`` and ``beta_f += r_e * (1 - share_f)``,
+        with ``share_f = s_f / noisyOR(F)`` as in :meth:`feedback` (``1`` for
+        ``credit="uniform"``) -- on both the entity and the global layer.
+        Scores and shares are computed before any update.
+
+        A large leak means nothing is learned (``leak -> inf`` gives
+        ``r_e -> 0``). Credited events are remembered and are never rejected
+        by :meth:`settle` for this effect; if ``settle(partial=True)`` had
+        already added negative evidence to one, it is undone first.
+
+        This learns **associations under the model**, not causal effects:
+        a feature that co-occurs with a true cause still receives some soft
+        credit (see the README section "Observational learning").
+        """
+        spec = self.effect(effect)
+        lk = spec.leak if leak is None else _check_leak(leak)
+        at = float(at)
+        obs = spec.obs
+        scored = []
+        for ev in self._window_events(spec, entity, at):
+            s = self.score(ev, effect, at)
+            if s > 0.0:
+                scored.append((ev, s, self._shares(spec, ev)))
+        total = lk + sum(s for _, s, _ in scored)
+        if math.isinf(lk):  # infinite background: nothing is learned
+            scored = []
+        credits = []
+        links = spec.links
+        for ev, s, shares in scored:
+            r = s / total
+            undo = obs.rejected.pop(ev.id, 0.0)
+            if undo:
+                for f in ev.features:
+                    links.update(f, 0.0, -undo, entity)
+                obs.stats["rejections_undone"] += 1
+            added = {}
+            for f in sorted(ev.features):
+                sh = shares[f]
+                links.update(f, r * sh, r * (1.0 - sh), entity)
+                added[f] = r * sh
+            obs.credited[ev.id] = obs.credited.get(ev.id, 0.0) + r
+            credits.append(EventCredit(ev.id, s, r, added))
+        credits.sort(key=lambda c: (-c.responsibility, -c.event_id))
+        bisect.insort(obs.occurrences.setdefault(entity, []), at)
+        leak_r = 1.0 if math.isinf(lk) else lk / total
+        obs.stats["occurrences"] += 1
+        obs.stats["leak_responsibility"] += leak_r
+        obs.stats["credited_mass"] += 1.0 - leak_r
+        return ObserveReport(entity, effect, at, lk, leak_r, tuple(credits))
+
+    def _occurred_in_window(self, spec: EffectSpec, ev: Event) -> bool:
+        occ = spec.obs.occurrences.get(ev.entity)
+        if not occ:
+            return False
+        lo = ev.time + max(spec.kernel.min_lag, 0.0)
+        hi = ev.time + spec.kernel.support
+        i = bisect.bisect_left(occ, lo)
+        return i < len(occ) and occ[i] <= hi
+
+    def settle(self, until: float, effects: Iterable[str] | str | None = None,
+               entity: str | None = None, partial: bool = False) -> SettleReport:
+        """Add negative evidence for events whose window passed without the effect.
+
+        For every event ``e`` (of an allowed cause type) whose kernel support
+        window ``[t_e + min_lag, t_e + support]`` has fully elapsed by
+        ``until`` and in which ``effect`` was never observed for ``e``'s entity
+        (via :meth:`observe`), each feature gets ``beta_f += w_neg * rules(e)``
+        (the effect's ``w_neg``, scaled by the event's rule multiplier; events
+        blocked by a rule are skipped). Events that received soft credit from
+        :meth:`observe` are never rejected for that effect. For a one-shot
+        effect (``repeatable=False``) events at or after the entity's first
+        occurrence are skipped too.
+
+        Incremental: a per-(entity, effect) cursor records the event-time
+        watermark already settled, so each call only looks at events newer
+        than the cursor (plus events inserted late, behind it). Calling it
+        twice with the same ``until`` is a no-op.
+
+        With ``partial=True``, events whose window has only *partly* elapsed
+        also get negative evidence, scaled by the fraction of the kernel's
+        mass already covered (``w_neg * mass_fraction(until - t_e)``), topped
+        up on later calls; a later :meth:`observe` in the window undoes it.
+
+        Args:
+            effects: one effect name, several, or None for all effects.
+            entity: restrict to one entity (default: all).
+        """
+        until = float(until)
+        if effects is None:
+            names = self.effects
+        elif isinstance(effects, str):
+            names = [effects]
+        else:
+            names = list(effects)
+        ents = [entity] if entity is not None else list(self._logs)
+        n_settled = n_rej = n_cred = n_obs = 0
+        w_total = 0.0
+        per: dict[str, int] = {}
+        for name in names:
+            spec = self.effect(name)
+            obs = spec.obs
+            per[name] = 0
+            for ent in ents:
+                log = self._logs.get(ent)
+                if log is None:
+                    continue
+                cur = obs.cursors.get(ent, -math.inf)
+                new_cur = max(cur, until - spec.kernel.support)
+                todo: list[tuple[Event, float]] = []
+                late = obs.late.pop(ent, [])
+                for eid in late:
+                    ev = self._events.get(eid)
+                    if ev is not None:
+                        todo.append((ev, 1.0))
+                if new_cur > cur:
+                    lo = cur if math.isfinite(cur) else -math.inf
+                    segs = (log.segments() if not math.isfinite(lo)
+                            else log.segments_between(lo, new_cur))
+                    for seg in segs:
+                        for ev in seg.events:
+                            if lo < ev.time <= new_cur:
+                                todo.append((ev, 1.0))
+                if partial:
+                    for seg in log.segments_between(new_cur, until):
+                        for ev in seg.events:
+                            if new_cur < ev.time <= until:
+                                todo.append((ev, spec.kernel.mass_fraction(until - ev.time)))
+                obs.cursors[ent] = new_cur
+                for ev, frac in todo:
+                    if not spec.type_allowed(ev.type):
+                        continue
+                    m = spec.rule_multiplier(ev)
+                    if m <= 0.0:
+                        continue
+                    if frac >= 1.0:
+                        n_settled += 1
+                        obs.stats["events_settled"] += 1
+                    if ev.id in obs.credited:
+                        if frac >= 1.0:
+                            n_cred += 1
+                            obs.stats["skipped_credited"] += 1
+                        continue
+                    if not spec.repeatable:
+                        occ = obs.occurrences.get(ev.entity)
+                        if occ and ev.time >= occ[0]:
+                            if frac >= 1.0:
+                                n_obs += 1
+                                obs.stats["skipped_terminal"] += 1
+                            continue
+                    if self._occurred_in_window(spec, ev):
+                        if frac >= 1.0:
+                            n_obs += 1
+                            obs.stats["skipped_observed"] += 1
+                        continue
+                    target = spec.w_neg * m * frac
+                    w = target - obs.rejected.get(ev.id, 0.0)
+                    if w <= 1e-12:
+                        continue
+                    for f in ev.features:
+                        spec.links.update(f, 0.0, w, ev.entity)
+                    obs.rejected[ev.id] = target
+                    w_total += w
+                    obs.stats["rejected_weight"] += w
+                    if frac >= 1.0:
+                        n_rej += 1
+                        per[name] += 1
+                        obs.stats["events_rejected"] += 1
+        return SettleReport(until, n_settled, n_rej, w_total, n_cred, n_obs, per)
+
+    def observation_stats(self, effect: str) -> dict[str, float]:
+        """Running counters of observational learning for ``effect``.
+
+        Besides the raw counters (see ``ObservationState``) it reports
+        ``mean_leak_responsibility``: the average share of an observed
+        occurrence attributed to the background. Close to 1 means the events
+        in the window rarely explain the effect (consider a smaller ``leak``,
+        better features or a different kernel); close to 0 means almost every
+        occurrence is explained by some event.
+        """
+        st = dict(self.effect(effect).obs.stats)
+        n = st["occurrences"]
+        st["mean_leak_responsibility"] = st["leak_responsibility"] / n if n else math.nan
+        return st
+
+    def link_report(
+        self,
+        effect: str,
+        entity: str | None = None,
+        min_support: float = 1.0,
+        level: float = 0.9,
+        baseline: float | str = "mean",
+        features: Iterable[str] | None = None,
+    ) -> LinkReport:
+        """Features ranked by mean link strength for ``effect``.
+
+        Each row has the Beta posterior mean, ``alpha``, ``beta``, the
+        effective evidence ``n`` (own + borrowed evidence, excluding the
+        prior), an equal-tailed ``level`` credible interval (default 90%)
+        and ``lift = strength / baseline``. ``baseline`` is ``"mean"`` (mean
+        strength of the reported features, default), ``"prior"`` (the
+        effect's default prior mean) or a number.
+
+        Only features with ``n >= min_support`` are reported. ``entity=None``
+        gives the global (population) view.
+
+        **These are associations under the model, not causal effects.**
+        With observational learning, a feature that merely co-occurs with a
+        real cause (a confounder: e.g. power users both use feature X and
+        convert more) also gets credit, and selection, novelty and survivor
+        effects are not modelled. Use the report to choose what to test
+        (e.g. an A/B experiment), not as proof.
+        """
+        spec = self.effect(effect)
+        links = spec.links
+        if features is not None:
+            feats = set(features)
+        else:
+            feats = set(links._priors) | set(links._global)
+            if entity is not None:
+                feats |= set(links.entity_counts(entity))
+        rows = []
+        for f in sorted(feats):
+            b = links.get(f, entity)
+            n = b.observations
+            if n < min_support:
+                continue
+            lo, hi = beta_interval(b.alpha, b.beta, level)
+            rows.append([f, b.strength, b.alpha, b.beta, n, lo, hi])
+        if isinstance(baseline, str):
+            if baseline == "mean":
+                base = sum(r[1] for r in rows) / len(rows) if rows else math.nan
+            elif baseline == "prior":
+                a, bb = links.default_prior
+                base = a / (a + bb)
+            else:
+                raise ValueError("baseline must be 'mean', 'prior' or a number")
+        else:
+            base = float(baseline)
+        out = tuple(
+            LinkRow(f, s, a, bb, n, lo, hi, s / base if base and base > 0 else math.nan)
+            for f, s, a, bb, n, lo, hi in sorted(rows, key=lambda r: (-r[1], r[0]))
+        )
+        return LinkReport(effect, entity, base, level, out)
+
     # -- calibration --------------------------------------------------------
 
     def calibration_records(self, effect: str) -> list[CalibrationRecord]:
@@ -1186,6 +1689,15 @@ class HeapDB:
                 n_events += 1
         n_links = sum(spec.links.forget_entity(entity, scrub_global=scrub_global)
                       for spec in self._effects.values())
+        for spec in self._effects.values():
+            obs = spec.obs
+            obs.occurrences.pop(entity, None)
+            obs.cursors.pop(entity, None)
+            obs.late.pop(entity, None)
+            if log is not None:
+                for ev in log.events():
+                    obs.credited.pop(ev.id, None)
+                    obs.rejected.pop(ev.id, None)
         n_cal = 0
         for eff, recs in self._calibration.items():
             keep = [r for r in recs if r.entity != entity]
@@ -1227,6 +1739,10 @@ class HeapDB:
                                "predicate": r.predicate is not None}
                               for r in spec.rules],
                     "pending_rules": spec.pending_rules,
+                    "leak": spec.leak,
+                    "w_neg": spec.w_neg,
+                    "repeatable": spec.repeatable,
+                    "observations": spec.obs.to_dict(),
                 }) + "\n")
             for ev in sorted(self._events.values(), key=lambda e: e.id):
                 fh.write(json.dumps({"kind": "event", **ev.to_dict()}) + "\n")
@@ -1240,7 +1756,7 @@ class HeapDB:
     @classmethod
     def load(cls, path: str | os.PathLike[str]) -> "HeapDB":
         """Rebuild a database (segments, indexes, links, calibration) from a
-        snapshot. Reads v1 and v2 snapshots."""
+        snapshot. Reads v1, v2 and v3 snapshots."""
         db: HeapDB | None = None
         with open(path, encoding="utf-8") as fh:
             for lineno, line in enumerate(fh, 1):
@@ -1269,6 +1785,10 @@ class HeapDB:
                         cause_types=frozenset(ct) if ct else None,
                         credit=rec.get("credit", "proportional"),
                         pending_rules=list(rec.get("pending_rules", [])),
+                        leak=float(rec.get("leak", DEFAULT_LEAK)),
+                        w_neg=float(rec.get("w_neg", 1.0)),
+                        repeatable=bool(rec.get("repeatable", True)),
+                        obs=ObservationState.from_dict(rec.get("observations")),
                     )
                     for r in rec.get("rules", []):
                         if r["predicate"]:
@@ -1298,6 +1818,20 @@ class HeapDB:
     def __repr__(self) -> str:
         return (f"HeapDB(events={len(self)}, entities={len(self._logs)}, "
                 f"effects={self.effects}, bucket_seconds={self.bucket_seconds:g})")
+
+
+def _check_leak(leak: float) -> float:
+    lk = float(leak)
+    if not lk > 0.0:  # also rejects NaN
+        raise ValueError(f"leak must be > 0 (inf disables observational learning), got {leak!r}")
+    return lk
+
+
+def _check_w_neg(w: float) -> float:
+    w = float(w)
+    if not (w >= 0.0 and math.isfinite(w)):
+        raise ValueError(f"w_neg must be a finite number >= 0, got {w!r}")
+    return w
 
 
 def half_life_to_lambda(half_life: float) -> float:

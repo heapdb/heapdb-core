@@ -105,6 +105,7 @@ pytest
 python examples/bloating.py
 python examples/incident_rca.py
 python examples/code_changes.py
+python examples/product_analytics.py
 python -m heapdb --demo      # REPL
 ```
 
@@ -151,12 +152,16 @@ FEEDBACK <effect> FOR <entity> AT <time> CONFIRMED <id> [REJECTED <id>,<id>...]
 INSERT <type> FOR <entity> [AT <time>] [FEATURES <f>,<f>...] [WEIGHT <dose>] [ATTRS k=v,...]
 CALIBRATION OF <effect> [BINS <n>]
 RISK OF <effect> FOR <entity> FEATURES <f>,<f>... [WEIGHT <w>] [TYPE <t>] [ATTRS k=v,...] [EXPLAIN]
+OBSERVE <effect> FOR <entity> [AT <time>] [LEAK <x>]
+SETTLE [<effect>] UNTIL <time> [FOR <entity>]
+LINKS OF <effect> [FOR <entity>] [MIN <n>]
 ```
 
 `FOR a,b,c` with several entities runs a group query. `<time>` can be
 seconds, `now`, `now-2h` or ISO-8601. `<duration>` can be `90`, `30m`,
 `12h` or `2d`. `RISK OF` scores a candidate that has not happened yet (see
-`feature_risk` below). Without `WEIGHT`, the dose comes from `ATTRS` via the
+`feature_risk` below). `OBSERVE`, `SETTLE` and `LINKS OF` are the
+observational-learning statements (see below). Without `WEIGHT`, the dose comes from `ATTRS` via the
 type's weight function, else 1.0. The REPL (`python -m heapdb`) also has meta commands:
 `.effect`, `.prior`, `.rules`, `.forget`, `.events`, `.save`, `.load` and
 `.help`. Rules and weight functions are Python callables, so you register
@@ -385,6 +390,78 @@ the observed confirm rate, plus the overall Brier score. Scores are clipped
 to [0, 1] for this, since a heavy dose can push a score above 1. There is no
 automatic recalibration yet (see Roadmap).
 
+### Observational learning: `observe`, `settle`, `link_report` (v0.4)
+
+Feedback assumes someone says "this event caused that effect". In product
+analytics, monitoring and many other settings nobody does: you only see that
+a user rage-clicked, converted or churned. v0.4 learns from those bare
+occurrences.
+
+**`db.observe(entity, effect, at, leak=None)`**: the effect happened, cause
+unknown. This is one soft-EM step. Every candidate `e` in the kernel window is
+scored exactly as in `top_causes` (kernel × dose × noisy-OR links × rules),
+and gets a responsibility
+
+```
+r_e = score_e / (leak + Σ_e' score_e')
+```
+
+`leak` is the effect's background rate, i.e. the weight of "it happened for
+no event in the window". Set it per effect with
+`register_effect(..., leak=0.05)` (the default) or per call. Each feature
+of `e` then gets the proportional credit of a confirmation, scaled by
+`r_e`: `alpha_f += r_e·share_f`, `beta_f += r_e·(1 − share_f)` with
+`share_f = s_f / noisyOR(F)`. Updates go to both the entity and the global
+layer. The returned `ObserveReport` lists every event's score,
+responsibility and per-feature credit, and the share taken by the leak.
+With a huge leak nothing is learned. With a tiny leak, every occurrence is
+fully explained by whatever happened in the window.
+
+**`db.settle(until, effects=None, entity=None, partial=False)`**: absence
+of the effect is evidence too. Take an event whose kernel support window
+`[t + min_lag, t + support]` has fully elapsed by `until`, where the effect
+was never observed for its entity in that window. Each of its features gets
+`beta_f += w_neg × rules(e)` (`register_effect(..., w_neg=1.0)`). An event
+that received soft credit from `observe` is never rejected for the same
+effect. A per-(entity, effect) cursor makes `settle` incremental (O(new
+events)) and idempotent, and events inserted behind the cursor are queued for
+the next call. With `partial=True`, events whose window is still open get
+negative evidence scaled by the fraction of kernel mass already elapsed
+(topped up later). If the effect does turn up in the window, a later
+`observe` undoes it. For one-shot effects (churn, first conversion),
+`register_effect(..., repeatable=False)` stops `settle` from rejecting an
+entity's events that come after its first occurrence.
+
+**`db.link_report(effect, entity=None, min_support=1, level=0.9,
+baseline="mean")`** returns a `LinkReport` with features sorted by posterior
+mean. Each row has `alpha`, `beta`, the effective evidence `n` (excluding the
+prior), an equal-tailed 90% credible interval and
+`lift = strength / baseline`. The baseline is the mean over reported
+features, the default prior mean (`"prior"`) or a number. The interval uses
+a stdlib implementation of the regularized incomplete beta function
+(`heapdb.stats.betainc`, Lentz continued fraction) and bisection for
+quantiles (`beta_ppf`, `beta_interval`).
+`db.observation_stats(effect)` reports running counters, including the
+mean leak responsibility.
+
+**Read it as association, not causation.** Links learned this way are
+associations *under the model*. Here is what the seeded simulation in
+`tests/test_v04_observe.py` shows. Several features follow a noisy-OR
+generative model with known per-feature probabilities, over 3,000 users.
+`link_report` recovers the ranking of the true effects (Spearman ≈ 0.96),
+and every real cause beats every null feature. A **confounder** `z` has no
+effect of its own but rides along with the strongest cause 80% of the time.
+It is *partly* separated: it stays below the strongest cause and below a
+moderate true cause, because proportional credit hands most of a shared
+event's credit to the stronger feature. It is *not fully* separated: it ranks
+confidently above the true nulls (lift ≈ 1.2). With `credit="uniform"` it
+climbs above the moderate cause. The `examples/product_analytics.py` script
+shows the same effect in product terms: power users both export more and
+convert more, so `event:used_export` shows up as a conversion association
+although it does nothing. Selection effects, novelty effects and survivor
+bias are not modelled either. Use the report to choose what to test, for
+example with an A/B experiment, and not as proof.
+
 ### ForwardDecayHeap: ordering that doesn't change with time
 
 With an exponential kernel, `score(now) = w · exp(-λ(now - t))`. In log space:
@@ -404,10 +481,12 @@ times.
 
 ### Persistence
 
-`db.save(path)` writes a JSONL snapshot (format version 2). It contains the
+`db.save(path)` writes a JSONL snapshot (format version 3). It contains the
 meta line, effects (kernel, priors, global layer, per-entity float counts,
-joint links, credit mode, rule metadata), events (with `attrs`) and
-calibration records. `HeapDB.load` reads both v1 and v2 snapshots.
+joint links, credit mode, rule metadata, and since v0.4 `leak`, `w_neg`,
+`repeatable` and the observational state: occurrences, credited and rejected
+events, settle cursors), events (with `attrs`) and calibration records.
+`HeapDB.load` reads v1, v2 and v3 snapshots.
 
 **Python callables are not serialised.** Type-level rules (`predicate=None`)
 are restored automatically. Predicate rules and event-type weight functions
@@ -442,6 +521,43 @@ Design direction (**not implemented** beyond `forget_entity`):
   the global-layer updates contributed by each entity (and bound each
   entity's contribution), so the population prior cannot be used to infer
   any one entity's history.
+
+## Changelog: v0.4
+
+- **Observational learning.** `observe(entity, effect, at, leak=None)` does
+  soft-EM credit for an effect occurrence with no labelled cause:
+  `r_e = score_e / (leak + Σ scores)`, then proportional credit scaled by
+  `r_e` on the entity and global layers. It returns an `ObserveReport`
+  (`EventCredit` per candidate). `register_effect` gained `leak=0.05`,
+  `w_neg=1.0` and `repeatable=True`.
+- **Negative evidence.** `settle(until, effects=None, entity=None,
+  partial=False)` adds `beta_f += w_neg × rules(e)` for events whose window
+  passed without the effect. It is incremental via per-(entity, effect)
+  cursors, idempotent, and handles late events. Credited events are never
+  rejected. `partial=True` scales by elapsed kernel mass
+  (`Kernel.mass_fraction`), and a later `observe` undoes it. It returns a
+  `SettleReport`. `observation_stats(effect)` gives the running counters.
+- **Link reports.** `link_report(effect, entity=None, min_support=1,
+  level=0.9, baseline="mean")` returns a `LinkReport` of `LinkRow`s
+  (mean, alpha, beta, n, credible interval, lift). These are associations,
+  not causal effects.
+- **Stats.** New `heapdb.stats`: `betainc` (regularized incomplete beta),
+  `beta_ppf`, `beta_interval`, `spearman`. Stdlib only.
+- **Query language.** `OBSERVE <effect> FOR <entity> [AT <t>] [LEAK <x>]`,
+  `SETTLE [<effect>] UNTIL <t> [FOR <entity>]`,
+  `LINKS OF <effect> [FOR <entity>] [MIN <n>]`, also in the REPL `.help`.
+- **Snapshots v3.** These persist `leak`, `w_neg`, `repeatable` and the
+  observational state. `forget_entity` also drops an entity's observational
+  state.
+- **New example.** `examples/product_analytics.py` covers synthetic users
+  with flag variants, pages, onboarding and exceptions. Its effects are
+  `rage_click` (minutes), `converted` (days) and `churned` (weeks). It prints
+  a link report per effect against the hidden truth, a confounder caveat
+  (`event:used_export`) and "why did this user churn?" EXPLAIN output.
+- **Tests.** `betainc` against binomial identities and closed forms, soft
+  credit sums, leak → ∞ learning nothing, settle idempotence, incrementality
+  and late events, partial settle with undo, snapshot round-trip, query
+  parsing, and a seeded noisy-OR simulation with a confounder.
 
 ## Changelog: v0.3
 
@@ -518,8 +634,12 @@ Ideas, not promises:
 - [ ] Privacy: per-entity keys with crypto-shredding, audit log, DP for the
       global layer (see Privacy)
 - [ ] Learning kernel parameters (lag distributions) from feedback, not just links
-- [ ] Better confounding handling: partial co-occurrence, lift, suggested
-      "elimination experiments" (v0.2 has exact co-occurrence + joint links)
+- [ ] Better confounding handling: partial co-occurrence, suggested
+      "elimination experiments" (v0.2 has exact co-occurrence + joint links;
+      v0.4 adds lift and credible intervals in `link_report`)
+- [ ] Observational learning: per-entity propensity adjustment / matched
+      comparisons to reduce confounding, learned leak rates, multi-step EM
+      (v0.4 does a single online soft-EM step per occurrence)
 - [ ] Negative / protective links, and effect-specific cause type hierarchies
 - [ ] Interaction features learned automatically (today a harmful combination such
       as `migration+review:fast` is learned only through its members unless you
