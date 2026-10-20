@@ -1,7 +1,8 @@
 # Examples
 
-All scripts are self-contained (stdlib only) and put the repository root on
-`sys.path`, so you can run them from a fresh checkout:
+All scripts are self-contained and only need the `heapdb` package (the Rust
+engine's Python bindings). From a checkout, build it once with
+`pip install .` (or `maturin develop --release` in a virtualenv), then:
 
 ```bash
 python examples/bloating.py

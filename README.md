@@ -19,11 +19,11 @@ TOP 3 CAUSES OF bloating FOR me AT now WITHIN 12h EXPLAIN
   ...
 ```
 
-> **Status: reference implementation / placeholder, not production.**
-> This repository is a small, readable, pure-Python implementation of the
-> HeapDB idea. It's meant for reading, experimenting and discussion. It is
-> single-process and in-memory (with JSONL snapshots), and it has not been
-> hardened or tuned. APIs will change. Benchmarks: see below.
+> **Status: early, not production.** Since v0.5 the engine is written in
+> Rust (`crates/heapdb`) and Python uses it through PyO3 bindings with the
+> same `import heapdb` API as before. It is single-process and in-memory
+> (with JSONL snapshots), and it has not been hardened. APIs may change.
+> Benchmarks: see below.
 
 ## The idea: "pop the top"
 
@@ -97,16 +97,34 @@ pre-merge queue next to the hidden true risk.
 
 ## Quickstart
 
-Requires Python 3.10+. No runtime dependencies.
+### Install (Python)
 
 ```bash
-pip install -e ".[test]"     # or just put this directory on PYTHONPATH
-pytest
+pip install git+https://github.com/heapdb/heapdb-core
+```
+
+This builds the Rust engine from source, so it needs a **Rust toolchain**
+(stable, >= 1.82; install with [rustup](https://rustup.rs)) in addition to
+Python >= 3.10. The build backend is [maturin](https://www.maturin.rs);
+`pip` fetches it automatically. Tagged releases also get pre-built abi3 wheels
+(Linux, macOS, Windows; CPython >= 3.10) from CI, which need no toolchain. The
+package has no runtime dependencies.
+
+### Develop
+
+```bash
+python -m venv .venv && . .venv/bin/activate
+pip install maturin pytest
+maturin develop --release    # build the extension into the venv
+pytest                       # Python test suite
+cargo test --workspace       # Rust unit, property and fixture tests
 python examples/bloating.py
 python examples/incident_rca.py
 python examples/code_changes.py
 python examples/product_analytics.py
-python -m heapdb --demo      # REPL
+python -m heapdb --demo      # REPL (also: `heapdb` script)
+cargo run -p heapdb-cli -- --demo          # the same REPL as a native binary
+cargo run -p heapdb-cli -- queries.hql     # run a query file
 ```
 
 ```python
@@ -144,6 +162,46 @@ db.save("me.jsonl")
 db2 = HeapDB.load("me.jsonl")
 ```
 
+### Using the Rust crate directly
+
+The engine is a plain Rust library (`crates/heapdb`) with no Python
+dependency:
+
+```rust
+use std::sync::Arc;
+
+use heapdb::{EffectOptions, EventRef, HeapDB, Kernel, NewEvent, TopK};
+
+fn main() -> heapdb::Result<()> {
+    let h = 3600.0;
+    let mut db = HeapDB::new(900.0, 64)?; // bucket_seconds, max_sets_per_segment
+    db.register_effect(
+        "bloating",
+        EffectOptions::new(Kernel::lognormal(2.0 * h, 0.6)?)
+            .prior("beans", 3.0, 1.0)
+            .prior("dairy", 2.0, 1.0),
+    )?;
+    // Soft rule: small portions are rarely the cause (predicate = any closure).
+    let small = |e: &EventRef<'_>| e.weight < 0.5;
+    db.add_rule("bloating", "small portion", Some(Arc::new(small)), 0.4, None)?;
+
+    db.insert(NewEvent::new("me", 8.0 * h, "meal").features(["oats", "dairy"]))?;
+    let lunch = db.insert(NewEvent::new("me", 13.0 * h, "meal").features(["beans", "onion"]).weight(1.5))?;
+
+    let res = db.top_causes("me", "bloating", 15.0 * h, TopK::new(3).explain(true))?;
+    println!("{res}"); // same text as format_result() in Python
+
+    let rep = db.feedback("me", "bloating", 15.0 * h, Some(lunch.id), &[], None)?;
+    println!("{:?}", rep.credit); // [("beans", 0.9375), ("onion", 0.25)]
+    db.save("me.jsonl")?;
+    Ok(())
+}
+```
+
+The query language is available too (`heapdb::query::execute_str(&mut db,
+"TOP 3 CAUSES OF bloating FOR me AT now EXPLAIN", now)`), as is the REPL
+logic (`heapdb::repl::handle_line`).
+
 ### Query language
 
 ```
@@ -164,24 +222,46 @@ seconds, `now`, `now-2h` or ISO-8601. `<duration>` can be `90`, `30m`,
 observational-learning statements (see below). Without `WEIGHT`, the dose comes from `ATTRS` via the
 type's weight function, else 1.0. The REPL (`python -m heapdb`) also has meta commands:
 `.effect`, `.prior`, `.rules`, `.forget`, `.events`, `.save`, `.load` and
-`.help`. Rules and weight functions are Python callables, so you register
-them through the API, not the query language.
+`.help`. Rules and weight functions are callables (Python callables, or Rust
+closures / trait objects), so you register them through the API, not the
+query language.
 
 ## Architecture
 
+A Cargo workspace (the engine and the CLI are pure Rust) plus a maturin
+project for the Python package:
+
 ```
-heapdb/
-  events.py         Event record (entity, time, type, features, weight, id)
-  kernels.py        Lag kernels: ExponentialDecay, WindowKernel, LogNormalKernel, GammaKernel
-  links.py          Hierarchical Beta links (prior / global / entity), EM credit, joint links
-  segments.py       Per-entity, time-bucketed segments with summaries + inverted index
-  store.py          HeapDB: insert, top-k + group queries with pruning, rules, explain,
-                    feature_risk / rank_candidates, feedback, calibration,
-                    forget_entity, snapshots
-  forward_decay.py  ForwardDecayHeap: time-invariant ordering for exponential decay
-  query.py          Query-language parser + executor
-  cli.py            `python -m heapdb` REPL
+Cargo.toml, pyproject.toml   workspace; maturin build config for the `heapdb` Python package
+crates/heapdb/               the engine (Rust library, no Python dependency)
+  src/event.rs               Event, attrs (JSON values), EventRef (what rule predicates see)
+  src/kernels.rs             lag kernels: exponential, window, log-normal, gamma (+ mass_fraction)
+  src/links.rs               hierarchical Beta links (prior / global / entity), EM credit,
+                             joint links, noisy-OR
+  src/segments.rs            per-entity, time-bucketed segments + summaries, posting lists
+  src/rules.rs               rules (type-level, or Predicate trait objects), WeightFn
+  src/store.rs               HeapDB: insert, pruned top-k + group (k-way merge) queries,
+                             explain, feature_risk / rank_candidates, feedback,
+                             calibration, forget_entity
+  src/observe.rs             observe (soft EM), settle (negative evidence, cursors), link_report
+  src/stats.rs               betainc (Lentz), beta_ppf / beta_interval, spearman, lgamma
+  src/snapshot.rs            JSONL snapshots (reads v1, v2, v3; writes v3)
+  src/forward_decay.rs       ForwardDecayHeap<T>
+  src/query.rs, src/repl.rs  query language (parser + executor), REPL commands
+  src/pyfmt.rs               Python-compatible number formatting for the text output
+  tests/                     property tests (proptest), behaviour tests, snapshot fixtures
+crates/heapdb-cli/           `heapdb` binary: REPL and query-file runner
+bindings/python/
+  src/                       PyO3 extension `heapdb._core` (abi3, CPython >= 3.10)
+  python/heapdb/             thin package: re-exports (heapdb.store, .links, .query, ...),
+                             `_core.pyi` type stubs, `py.typed`, CLI terminal I/O
+tests/, examples/, benchmarks/   Python test suite, examples and benchmarks (use the package)
 ```
+
+Python objects such as `db.effect(name)`, `.links` and `db.entity_log(e)`
+are live views into the Rust database. Rule predicates and weight functions
+registered from Python are Python callables that the engine calls back
+(exceptions propagate unchanged).
 
 ### Storage: segmented append-only log
 
@@ -231,7 +311,10 @@ For `top_causes(entity, effect, at, k)`:
    can enter the top-k, so we stop. The rest are counted as pruned in
    `QueryResult.stats`.
 
-The answer is **exact**. `tests/test_topk.py` checks it against brute force
+The answer is **exact**. Noisy-OR multiplies the `(1 - s)` factors in a
+canonical order, so events whose features have equal strengths get
+bit-identical scores and ties are always broken by event id (the later event
+wins). `crates/heapdb/tests/topk_props.rs` (proptest) and `tests/test_topk.py` check it against brute force
 on random data across all kernels, 12 seeds, `WITHIN` caps, type filters,
 soft and hard rules, the union fallback, hierarchical links and interleaved
 feedback. It also checks bound ≥ score directly for every event. In
@@ -250,7 +333,7 @@ top-3 over 151 segments in window gives:
 ### Cross-entity group queries
 
 `db.top_causes_group(["checkout", "payments", "search"], "latency_spike", at, k)`
-runs the per-entity top-k and k-way merges them with `heapq.merge`. Each
+runs the per-entity top-k and k-way merges them (a heap over the list heads). Each
 cause carries its `entity`. The result is exact with respect to brute force
 over the union of the entities' events. A group query takes exactly one
 effect: mixing effects raises, because their scores are on different scales.
@@ -438,9 +521,9 @@ mean. Each row has `alpha`, `beta`, the effective evidence `n` (excluding the
 prior), an equal-tailed 90% credible interval and
 `lift = strength / baseline`. The baseline is the mean over reported
 features, the default prior mean (`"prior"`) or a number. The interval uses
-a stdlib implementation of the regularized incomplete beta function
-(`heapdb.stats.betainc`, Lentz continued fraction) and bisection for
-quantiles (`beta_ppf`, `beta_interval`).
+the regularized incomplete beta function (`heapdb.stats.betainc`, Lentz
+continued fraction, with a port of CPython's Lanczos `lgamma`) and bisection
+for quantiles (`beta_ppf`, `beta_interval`).
 `db.observation_stats(effect)` reports running counters, including the
 mean leak responsibility.
 
@@ -474,7 +557,7 @@ log score(now) = [ log w + λ t ]  -  λ now
 The key is fixed at insert, and the time-dependent term shifts every item
 equally, so **a heap ordered by key is correctly ordered at every instant.**
 No re-keying is needed as time passes. `ForwardDecayHeap` implements this with
-`heapq` (`push`, `pop(now)`, `peek_top(now)`, `top_k`) and supports O(1)
+a binary heap (`push`, `pop(now)`, `peek_top(now)`, `top_k`) and supports O(1)
 deletion via tombstones that are cleaned up lazily. The RCA example uses it as
 a live "top suspect" ticker and checks it against `top_causes` at several
 times.
@@ -486,7 +569,9 @@ meta line, effects (kernel, priors, global layer, per-entity float counts,
 joint links, credit mode, rule metadata, and since v0.4 `leak`, `w_neg`,
 `repeatable` and the observational state: occurrences, credited and rejected
 events, settle cursors), events (with `attrs`) and calibration records.
-`HeapDB.load` reads v1, v2 and v3 snapshots.
+`HeapDB.load` reads v1, v2 and v3 snapshots, including files written by the
+pre-0.5 Python engine (checked against fixtures written by the original
+v0.1, v0.2 and v0.4 code). The v0.5 engine writes v3 as well.
 
 **Python callables are not serialised.** Type-level rules (`predicate=None`)
 are restored automatically. Predicate rules and event-type weight functions
@@ -521,6 +606,39 @@ Design direction (**not implemented** beyond `forget_entity`):
   the global-layer updates contributed by each entity (and bound each
   entity's contribution), so the population prior cannot be used to infer
   any one entity's history.
+
+## Changelog: v0.5
+
+- **Engine rewritten in Rust; API unchanged.** The engine is now the
+  `heapdb` Rust crate (`crates/heapdb`). Python keeps `import heapdb` with
+  the same classes, methods, signatures, defaults and `str()` output, via
+  PyO3 bindings (`bindings/python`, abi3 wheels for CPython >= 3.10) built
+  with maturin. The existing Python test suite passes unchanged, and all
+  examples print the same output. Before the pure-Python engine was removed,
+  2,040 random differential workloads compared the two engines (rankings,
+  scores to 1e-9, learned links, observe/settle, risk, link reports,
+  calibration, snapshots) with no disagreement.
+- **Native CLI.** `crates/heapdb-cli` builds a `heapdb` binary: the REPL and
+  a runner for query files (`heapdb queries.hql`). The Python `heapdb`
+  script uses the same Rust REPL logic and also runs query files.
+- **Snapshots.** Snapshots written by the Python engine (v1, v2, v3) load
+  unchanged; snapshots are still written as v3. Fix: loading no longer
+  re-queues already settled events into the `settle` backlog (the Python
+  engine duplicated the saved `late` lists on every load).
+- **Deterministic ties.** Noisy-OR is computed in a canonical order, so
+  mathematically tied events tie exactly and are ordered by event id. In
+  Python the order of `frozenset` iteration could break such ties by a
+  last-bit rounding difference.
+- **Packaging.** `pyproject.toml` uses maturin (Rust toolchain needed to
+  build from source). `.pyi` stubs and `py.typed` ship with the package.
+  CI runs `cargo fmt --check`, `clippy -D warnings`, `cargo test` and the
+  pytest suite on Linux/macOS/Windows, and builds wheels on tags.
+- **Benchmarks.** These are re-run with the Rust engine, and a new
+  `bruteforce-rust` baseline (same Rust scoring, no pruning) is added. See
+  "Python engine vs Rust engine" in `benchmarks/RESULTS.md`.
+- **Not ported.** There are no user-defined Python `Kernel` subclasses
+  (kernels are the four built-in kinds). Python objects in `attrs` must be
+  JSON values (tuples become lists).
 
 ## Changelog: v0.4
 
@@ -697,7 +815,7 @@ Ideas, not promises:
       add a cross feature yourself)
 - [ ] Incremental "standing queries" built on forward decay for exponential kernels
 - [ ] Durable storage: write-ahead log, compaction, segment files
-- [ ] A Rust/Go core with this implementation kept as the executable spec
+- [x] ~~A Rust core~~: v0.5 (the Python engine served as the differential oracle during the port)
 
 ## Contributing
 
