@@ -62,6 +62,8 @@ pub struct Kernel {
     shape: KernelShape,
     support: f64,
     mu: f64,
+    /// `raw(mode)`, the normaliser of `value` (cached: it is a constant).
+    peak: f64,
     mass: OnceLock<MassTable>,
 }
 
@@ -78,6 +80,7 @@ impl Clone for Kernel {
             shape: self.shape,
             support: self.support,
             mu: self.mu,
+            peak: self.peak,
             mass: self.mass.clone(),
         }
     }
@@ -115,12 +118,15 @@ impl Kernel {
                 (mean + tail_stds * std, 0.0)
             }
         };
-        Kernel {
+        let mut k = Kernel {
             shape,
             support,
             mu,
+            peak: 0.0,
             mass: OnceLock::new(),
-        }
+        };
+        k.peak = k.raw(k.mode());
+        k
     }
 
     /// Exponential decay with the default horizon of 10 half-lives.
@@ -271,7 +277,7 @@ impl Kernel {
         if dt < self.min_lag() || dt > self.support || dt < 0.0 {
             return 0.0;
         }
-        let peak = self.raw(self.mode());
+        let peak = self.peak;
         if peak > 0.0 {
             (self.raw(dt) / peak).min(1.0)
         } else {
