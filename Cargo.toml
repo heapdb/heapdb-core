@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/heapdb", "crates/heapdb-cli", "bindings/python"]
-default-members = ["crates/heapdb", "crates/heapdb-cli"]
+members = ["crates/heapdb", "crates/heapdb-cli", "crates/heapdb-server", "bindings/python"]
+default-members = ["crates/heapdb", "crates/heapdb-cli", "crates/heapdb-server"]
 
 [workspace.package]
 version = "0.5.0"
