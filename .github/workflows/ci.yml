@@ -73,7 +73,7 @@ jobs:
         include:
           - { os: ubuntu-latest, target: x86_64, manylinux: auto }
           - { os: ubuntu-latest, target: aarch64, manylinux: auto }
-          - { os: macos-13, target: x86_64 }
+          - { os: macos-14, target: x86_64 }   # cross-compiled on Apple silicon
           - { os: macos-14, target: aarch64 }
           - { os: windows-latest, target: x64 }
     runs-on: ${{ matrix.os }}
@@ -105,3 +105,29 @@ jobs:
         with:
           name: sdist
           path: dist
+
+  # Publishes wheels + sdist to PyPI with trusted publishing (OIDC, no API token).
+  # One-time PyPI setup: a (pending) trusted publisher for project "heapdb" with
+  # owner heapdb, repository heapdb-core, workflow ci.yml, environment pypi.
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [wheels, sdist]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/heapdb/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches package version
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          have=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
+          [ "$want" = "$have" ] || { echo "::error::tag v$want but pyproject.toml has $have"; exit 1; }
+      - uses: actions/download-artifact@v4
+        with:   # this run's only artifacts are the wheels-* and sdist uploads above
+          merge-multiple: true
+          path: dist
+      - run: ls -l dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

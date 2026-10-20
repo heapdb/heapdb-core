@@ -100,15 +100,21 @@ pre-merge queue next to the hidden true risk.
 ### Install (Python)
 
 ```bash
-pip install git+https://github.com/heapdb/heapdb-core
+pip install heapdb
 ```
 
-This builds the Rust engine from source, so it needs a **Rust toolchain**
-(stable, >= 1.82; install with [rustup](https://rustup.rs)) in addition to
-Python >= 3.10. The build backend is [maturin](https://www.maturin.rs);
-`pip` fetches it automatically. Tagged releases also get pre-built abi3 wheels
-(Linux, macOS, Windows; CPython >= 3.10) from CI, which need no toolchain. The
-package has no runtime dependencies.
+Pre-built abi3 wheels on [PyPI](https://pypi.org/project/heapdb/) cover Linux
+(x86_64, aarch64), macOS (Intel, Apple silicon) and Windows (x64) for CPython
+>= 3.10, so no Rust toolchain is needed. The package has no runtime
+dependencies.
+
+To install the latest `main` from source instead
+(`pip install git+https://github.com/heapdb/heapdb-core`), you need a **Rust
+toolchain** (stable, >= 1.82; install with [rustup](https://rustup.rs)); the
+build backend, [maturin](https://www.maturin.rs), is fetched by `pip`.
+
+Releases are published from tags (`vX.Y.Z`) by CI with PyPI trusted
+publishing; the tag must match the version in `pyproject.toml`.
 
 ### Develop
 
