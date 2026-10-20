@@ -1,0 +1,6 @@
+# Benchmark-only dependencies. The heapdb package itself has none.
+# psutil: RSS memory measurement (memory columns are null without it).
+# psycopg: PostgreSQL implementation (skipped without it or without a server).
+psutil>=5.9
+psycopg[binary]>=3.1
+pytest>=7

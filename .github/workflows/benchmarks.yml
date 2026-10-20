@@ -1,0 +1,65 @@
+name: benchmarks
+
+# Small benchmark run (10K events, --quick) on every PR, including
+# PostgreSQL via a service container; full runs on manual dispatch.
+# Results are uploaded as artifacts. CI runners are shared VMs: use these
+# numbers for regressions and correctness, not as headline figures.
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      sizes:
+        description: "comma list of sizes, e.g. 10k,100k,1m"
+        default: "10k,100k"
+      extra_args:
+        description: "extra arguments for python -m benchmarks.run"
+        default: ""
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bench
+          POSTGRES_PASSWORD: bench
+          POSTGRES_DB: bench
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U bench" --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    env:
+      HEAPDB_BENCH_PG_DSN: "host=localhost port=5432 user=bench password=bench dbname=bench"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test]" -r benchmarks/requirements.txt
+      - name: Tests (implementations agree, incl. PostgreSQL)
+        run: pytest -q -rs
+      - name: Quick benchmark (PR)
+        if: github.event_name == 'pull_request'
+        run: python -m benchmarks.run --quick --out bench-results/quick.json
+      - name: Benchmark (manual)
+        if: github.event_name == 'workflow_dispatch'
+        run: >
+          python -m benchmarks.run --sizes "${{ github.event.inputs.sizes }}"
+          ${{ github.event.inputs.extra_args }} --out bench-results/ci.json
+      - name: Render report
+        if: always()
+        run: |
+          for f in bench-results/*.json; do
+            [ -e "$f" ] && python -m benchmarks.report "$f" -o "${f%.json}.md"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results
+          path: bench-results/

@@ -23,7 +23,7 @@ TOP 3 CAUSES OF bloating FOR me AT now WITHIN 12h EXPLAIN
 > This repository is a small, readable, pure-Python implementation of the
 > HeapDB idea. It's meant for reading, experimenting and discussion. It is
 > single-process and in-memory (with JSONL snapshots), and it has not been
-> hardened, benchmarked or tuned. APIs will change.
+> hardened or tuned. APIs will change. Benchmarks: see below.
 
 ## The idea: "pop the top"
 
@@ -622,11 +622,62 @@ Design direction (**not implemented** beyond `forget_entity`):
   `global_pos`/`global_neg`. `Explanation` gained `rules`, `joint_causes` and
   `entity`.
 
+## Benchmarks
+
+[`benchmarks/RESULTS.md`](benchmarks/RESULTS.md) has the full, reproducible
+results: query latency (p50/p95/p99) from 10K to 10M events for HeapDB,
+brute force with the same scoring code, SQLite and PostgreSQL (all checked
+to return identical top-k before timing), pruning, ingest, memory,
+sensitivity to kernels and bucket sizes, and ranking quality against a known
+ground truth. They were measured on one 2-vCPU VM and are synthetic, and this
+is a pure-Python engine competing with C-backed SQL engines, so read the
+"Reading these results" section there before quoting any number. Rerun with
+`pip install -r benchmarks/requirements.txt && python -m benchmarks.run`.
+
+A few lines copied verbatim from those tables. Latency in ms (p50, p95, p99,
+mean), default kernel:
+
+```
+| 1M | `heapdb` | 1.98 | 3.24 | 4.05 | 2.16 | 50 (50 non-empty) |
+| 1M | `bruteforce` | 1.75 | 2.63 | 3.16 | 1.83 | 50 (50 non-empty) |
+| 1M | `sqlite-mem` | 1.55 | 2.00 | 2.76 | 1.59 | 50 (50 non-empty) |
+| 1M | `postgres` | 3.52 | 5.40 | 6.09 | 3.72 | 50 (50 non-empty) |
+```
+
+Pruning at 1M (events in window, heapdb events scored, scored p99, segments
+in window, segments pruned, pruned %):
+
+```
+| 1M | 459.0 | 19.2 | 30 | 129.2 | 124.7 | 96.6% |
+```
+
+Where pruning fails: flat 24h window with all links equal (heapdb is slower;
+columns: events in window, heapdb scored, pruned %, heapdb p50, bruteforce
+p50, sqlite-mem p50, bruteforce / heapdb):
+
+```
+| `window_24h` | 333.5 | 117.9 | 70.6% | 2.03 | 1.33 | 0.977 | 0.65x |
+```
+
+Ranking quality, hit@1 of the true culprit (days 0-3.5, days 3.5-7, whole
+week; mean ± std over 20 seeds):
+
+```
+| `recency` | 0.335 ± 0.097 | 0.411 ± 0.117 | 0.367 ± 0.070 |
+| `heapdb_proportional` | 0.536 ± 0.098 | 0.600 ± 0.111 | 0.562 ± 0.076 |
+```
+
+In short: pruning cuts the events scored, but in this Python implementation
+it does not beat brute force or SQLite on wall time. HeapDB also ingests
+slower and uses more memory per event, which is why 10M events were not
+measured for it on this machine.
+
 ## Roadmap
 
 Ideas, not promises:
 
-- [ ] Benchmarks and guidance for choosing `bucket_seconds`; multi-resolution
+- [x] ~~Benchmarks~~: `benchmarks/` (see Benchmarks above)
+- [ ] Guidance for choosing `bucket_seconds`; multi-resolution
       (hierarchical) segment summaries for long lookbacks
 - [x] ~~Per-feature max-weight summaries for tighter bounds~~: per-set bounds in v0.2
 - [ ] Automatic recalibration (Platt / isotonic) from the calibration records,

@@ -8,6 +8,7 @@ ideas, critiques and experiments are just as welcome as code.
 - **Readable over clever.** This code exists to be read. Prefer clear names,
   short functions and a comment explaining *why* over micro-optimisations.
 - **Stdlib only** for the `heapdb` package. `pytest` is the only dev dependency.
+  Benchmark code in `benchmarks/` may use `benchmarks/requirements.txt`.
 - **Python 3.10+.**
 - **Exactness first.** Any change to the query engine must keep
   `tests/test_topk.py` green: pruned top-k must equal brute force, and
@@ -32,7 +33,9 @@ python examples/code_changes.py
   parametrised tests in `tests/test_kernels.py` and `tests/test_topk.py`.
 - Better confounding detection (partial co-occurrence, lift).
 - Recalibration from `calibration_report` data (Platt / isotonic).
-- Benchmarks: segment width vs. pruning rate on realistic workloads.
+- Benchmarks: more realistic (bursty) workloads in `benchmarks/workload.py`.
+  Never edit `benchmarks/RESULTS.md` by hand: rerun `python -m benchmarks.run`
+  and `python -m benchmarks.report`.
 - Query-language features (`WHERE type = ...`, `RANK BY ...`).
 
 ## Pull requests
