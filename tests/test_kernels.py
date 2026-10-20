@@ -61,6 +61,15 @@ def test_values_in_unit_interval_and_zero_for_future(k):
 
 
 @pytest.mark.parametrize("k", KERNELS, ids=repr)
+def test_negative_lag_is_always_zero(k):
+    """Temporal sanity: a cause can never follow its effect."""
+    for dt in (-1e-9, -1.0, -k.support / 2, -k.support, -1e12):
+        assert k.value(dt) == 0.0
+    assert k.max_over(-k.support, -1e-9) == 0.0
+    assert k.max_over(-k.support, 0.0) == k.value(0.0)
+
+
+@pytest.mark.parametrize("k", KERNELS, ids=repr)
 def test_max_over_is_a_true_upper_bound(k):
     """max_over must bound value() everywhere in the interval (pruning relies on it)."""
     rng = random.Random(0)

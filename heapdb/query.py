@@ -2,12 +2,23 @@
 
 Grammar (keywords are case-insensitive; ``[...]`` is optional)::
 
-    TOP <k> CAUSES OF <effect> FOR <entity> [AT <time>] [WITHIN <duration>] [EXPLAIN]
+    TOP <k> CAUSES OF <effect> FOR <entity>[,<entity>...] [AT <time>]
+        [WITHIN <duration>] [EXPLAIN]
+
+    CALIBRATION OF <effect> [BINS <n>]
 
     FEEDBACK <effect> FOR <entity> AT <time> CONFIRMED <event_id>
              [REJECTED <id>[,<id>...]]
 
     INSERT <type> FOR <entity> [AT <time>] [FEATURES <f>[,<f>...]] [WEIGHT <w>]
+
+``FOR a,b,c`` (several entities) runs a cross-entity group query
+(:meth:`~heapdb.store.HeapDB.top_causes_group`); scores are only comparable
+across entities once calibrated (see ``CALIBRATION OF``). ``CALIBRATION OF``
+reports mean predicted score vs observed confirm rate per bin and the Brier
+score. ``INSERT`` also accepts ``ATTRS k=v[,k=v...]`` (numeric values are
+parsed as numbers); without ``WEIGHT`` the event type's registered weight
+function, if any, derives the weight from the attributes.
 
 ``<time>`` is a number of seconds, ``now``, ``now-<duration>``, or an ISO-8601
 datetime (``2024-05-01T13:30``). ``<duration>`` is a number with an optional
@@ -28,7 +39,7 @@ from datetime import datetime
 from typing import Callable, Union
 
 from .events import format_time
-from .store import HeapDB, QueryResult
+from .store import CalibrationReport, HeapDB, QueryResult
 
 _UNITS = {"s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
 _DURATION_RE = re.compile(r"^(\d+(?:\.\d+)?)([smhd]?)$", re.IGNORECASE)
@@ -65,6 +76,18 @@ class TopCausesQuery:
     at: TimeExpr = NOW
     within: float | None = None
     explain: bool = False
+    #: All entities named in ``FOR``; more than one means a group query.
+    entities: tuple[str, ...] = ()
+
+    @property
+    def is_group(self) -> bool:
+        return len(self.entities) > 1
+
+
+@dataclass(frozen=True)
+class CalibrationQuery:
+    effect: str
+    bins: int = 10
 
 
 @dataclass(frozen=True)
@@ -82,10 +105,11 @@ class InsertStmt:
     entity: str
     at: TimeExpr = NOW
     features: frozenset[str] = field(default_factory=frozenset)
-    weight: float = 1.0
+    weight: float | None = None  # None: derived from attrs, else 1.0
+    attrs: tuple[tuple[str, object], ...] = ()
 
 
-Statement = Union[TopCausesQuery, FeedbackStmt, InsertStmt]
+Statement = Union[TopCausesQuery, FeedbackStmt, InsertStmt, CalibrationQuery]
 
 
 # ---------------------------------------------------------------------------
@@ -177,8 +201,11 @@ def parse(text: str) -> Statement:
         stmt = _parse_feedback(ts)
     elif head == "INSERT":
         stmt = _parse_insert(ts)
+    elif head == "CALIBRATION":
+        stmt = _parse_calibration(ts)
     else:
-        raise QueryError(f"unknown statement {head!r} (expected TOP, FEEDBACK or INSERT)")
+        raise QueryError(f"unknown statement {head!r} "
+                         f"(expected TOP, FEEDBACK, INSERT or CALIBRATION)")
     if not ts.done():
         raise QueryError(f"unexpected trailing input: {' '.join(ts.toks[ts.i:])!r}")
     return stmt
@@ -194,7 +221,11 @@ def _parse_top(ts: _Tokens) -> TopCausesQuery:
     ts.expect("OF")
     effect = ts.next("effect name")
     ts.expect("FOR")
-    entity = ts.next("entity")
+    entity_tok = ts.next("entity")
+    entities = tuple(dict.fromkeys(e for e in entity_tok.split(",") if e))
+    if not entities:
+        raise QueryError(f"bad entity list {entity_tok!r}")
+    entity = ",".join(entities)
     at, within, explain = NOW, None, False
     while not ts.done():
         kw = ts.next("clause").upper()
@@ -206,7 +237,41 @@ def _parse_top(ts: _Tokens) -> TopCausesQuery:
             explain = True
         else:
             raise QueryError(f"unexpected {kw!r} (expected AT, WITHIN or EXPLAIN)")
-    return TopCausesQuery(k=k, effect=effect, entity=entity, at=at, within=within, explain=explain)
+    return TopCausesQuery(k=k, effect=effect, entity=entity, at=at, within=within,
+                          explain=explain, entities=entities)
+
+
+def _parse_calibration(ts: _Tokens) -> CalibrationQuery:
+    ts.expect("OF")
+    effect = ts.next("effect name")
+    bins = 10
+    if ts.peek_kw("BINS"):
+        ts.next("BINS")
+        bins = _int(ts.next("bins"), "bins")
+        if bins < 1:
+            raise QueryError("BINS must be >= 1")
+    return CalibrationQuery(effect, bins)
+
+
+def _attr_value(v: str) -> object:
+    for conv in (int, float):
+        try:
+            return conv(v)
+        except ValueError:
+            pass
+    return v
+
+
+def _parse_attrs(tok: str) -> tuple[tuple[str, object], ...]:
+    out = []
+    for part in tok.split(","):
+        if not part:
+            continue
+        k, sep, v = part.partition("=")
+        if not sep or not k:
+            raise QueryError(f"bad attribute {part!r} (expected key=value)")
+        out.append((k, _attr_value(v)))
+    return tuple(out)
 
 
 def _parse_feedback(ts: _Tokens) -> FeedbackStmt:
@@ -228,7 +293,9 @@ def _parse_insert(ts: _Tokens) -> InsertStmt:
     type_ = ts.next("event type")
     ts.expect("FOR")
     entity = ts.next("entity")
-    at, feats, weight = NOW, frozenset(), 1.0
+    at, feats = NOW, frozenset()
+    weight: float | None = None
+    attrs: tuple[tuple[str, object], ...] = ()
     while not ts.done():
         kw = ts.next("clause").upper()
         if kw == "AT":
@@ -240,9 +307,11 @@ def _parse_insert(ts: _Tokens) -> InsertStmt:
                 weight = float(ts.next("weight"))
             except ValueError:
                 raise QueryError("WEIGHT must be a number") from None
+        elif kw == "ATTRS":
+            attrs = _parse_attrs(ts.next("attributes"))
         else:
-            raise QueryError(f"unexpected {kw!r} (expected AT, FEATURES or WEIGHT)")
-    return InsertStmt(type_, entity, at, feats, weight)
+            raise QueryError(f"unexpected {kw!r} (expected AT, FEATURES, WEIGHT or ATTRS)")
+    return InsertStmt(type_, entity, at, feats, weight, attrs)
 
 
 # ---------------------------------------------------------------------------
@@ -254,14 +323,20 @@ def execute(
     db: HeapDB,
     stmt: Statement | str,
     clock: Callable[[], float] = _time.time,
-) -> QueryResult | str:
-    """Run a statement. Queries return a QueryResult; writes return a message."""
+) -> QueryResult | CalibrationReport | str:
+    """Run a statement. Queries return a QueryResult (or CalibrationReport);
+    writes return a message."""
     if isinstance(stmt, str):
         stmt = parse(stmt)
     now = clock()
     if isinstance(stmt, TopCausesQuery):
+        if stmt.is_group:
+            return db.top_causes_group(stmt.entities, stmt.effect, stmt.at.resolve(now),
+                                       k=stmt.k, explain=stmt.explain, within=stmt.within)
         return db.top_causes(stmt.entity, stmt.effect, stmt.at.resolve(now),
                              k=stmt.k, explain=stmt.explain, within=stmt.within)
+    if isinstance(stmt, CalibrationQuery):
+        return db.calibration_report(stmt.effect, bins=stmt.bins)
     if isinstance(stmt, FeedbackStmt):
         db.feedback(stmt.entity, stmt.effect, stmt.at.resolve(now),
                     confirmed_event_id=stmt.confirmed, rejected_ids=stmt.rejected)
@@ -269,18 +344,23 @@ def execute(
                 + (f", rejected {', '.join('#' + str(r) for r in stmt.rejected)}"
                    if stmt.rejected else ""))
     if isinstance(stmt, InsertStmt):
-        ev = db.insert(stmt.entity, stmt.at.resolve(now), stmt.type, stmt.features, stmt.weight)
+        ev = db.insert(stmt.entity, stmt.at.resolve(now), stmt.type, stmt.features,
+                       stmt.weight, attrs=dict(stmt.attrs))
         return f"ok: inserted {ev.short()}"
     raise QueryError(f"cannot execute {stmt!r}")  # pragma: no cover
 
 
-def format_result(res: QueryResult) -> str:
-    """Pretty-print a QueryResult (used by the CLI and examples)."""
-    lines = [f"Top causes of '{res.effect}' for {res.entity} at t={format_time(res.at)}:"]
+def format_result(res: QueryResult | CalibrationReport) -> str:
+    """Pretty-print a QueryResult or CalibrationReport (CLI and examples)."""
+    if isinstance(res, CalibrationReport):
+        return str(res)
+    who = f"entities {res.entity}" if res.is_group else res.entity
+    lines = [f"Top causes of '{res.effect}' for {who} at t={format_time(res.at)}:"]
     if not res.causes:
         lines.append("  (no candidate causes in window)")
     for c in res:
-        lines.append(f"  {c.rank}. {c.event.short():<44} score={c.score:.4f}")
+        ent = f"{c.entity}: " if res.is_group else ""
+        lines.append(f"  {c.rank}. {ent}{c.event.short():<44} score={c.score:.4f}")
         if c.explanation is not None:
             lines.append(f"      {c.explanation}")
     lines.append(f"  [{res.stats}]")

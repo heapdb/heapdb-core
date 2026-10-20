@@ -10,7 +10,9 @@ ideas, critiques and experiments are just as welcome as code.
 - **Stdlib only** for the `heapdb` package. `pytest` is the only dev dependency.
 - **Python 3.10+.**
 - **Exactness first.** Any change to the query engine must keep
-  `tests/test_topk.py` green: pruned top-k must equal brute force.
+  `tests/test_topk.py` green: pruned top-k must equal brute force, and
+  segment bounds must stay *true* upper bounds (rule multipliers are capped
+  at 1 for this reason).
 
 ## Getting started
 
@@ -28,6 +30,7 @@ python examples/incident_rca.py
   `support`, `to_dict`; register in `KERNEL_TYPES`; add the kernel to the
   parametrised tests in `tests/test_kernels.py` and `tests/test_topk.py`.
 - Better confounding detection (partial co-occurrence, lift).
+- Recalibration from `calibration_report` data (Platt / isotonic).
 - Benchmarks: segment width vs. pruning rate on realistic workloads.
 - Query-language features (`WHERE type = ...`, `RANK BY ...`).
 

@@ -1,13 +1,27 @@
 """``python -m heapdb``: a minimal REPL over the query language.
 
-Besides the statements documented in :mod:`heapdb.query`, the REPL accepts a
-few meta commands::
+Statements::
+
+    TOP <k> CAUSES OF <effect> FOR <entity>[,<entity>...] [AT <time>]
+        [WITHIN <duration>] [EXPLAIN]          several entities = group query
+    FEEDBACK <effect> FOR <entity> AT <time> CONFIRMED <id> [REJECTED <id>,...]
+    INSERT <type> FOR <entity> [AT <time>] [FEATURES f1,f2] [WEIGHT <dose>]
+        [ATTRS k=v,k=v]
+    CALIBRATION OF <effect> [BINS <n>]
+
+``<time>``: seconds, now, now-2h, ISO-8601. ``<duration>``: 90, 30m, 12h, 2d.
+
+Meta commands::
 
     .effect <name> <kernel> <args...>   register an effect, e.g.
                                         .effect bloating lognormal 2h 0.6
                                         .effect latency exp 30m
                                         .effect incident window 0 1h
     .prior <effect> <feature> <a> <b>   set a Beta prior for a feature
+    .rules <effect>                     list plausibility rules (rules are
+                                        Python callables: add them via the API)
+    .forget <entity> [scrub]            delete an entity (scrub: also its
+                                        contributions to global links)
     .events [entity]                    list stored events
     .save <path> / .load <path>         JSONL snapshot
     .help / .quit
@@ -25,7 +39,7 @@ from typing import Callable, TextIO
 
 from .kernels import ExponentialDecay, GammaKernel, Kernel, LogNormalKernel, WindowKernel
 from .query import QueryError, execute, format_result, parse_duration
-from .store import HeapDB, QueryResult
+from .store import CalibrationReport, HeapDB, QueryResult
 
 HELP = __doc__ or ""
 
@@ -74,6 +88,21 @@ def handle_line(db: HeapDB, line: str, clock: Callable[[], float]) -> tuple[Heap
                 raise QueryError("usage: .prior <effect> <feature> <alpha> <beta>")
             db.effect(args[0]).links.set_prior(args[1], float(args[2]), float(args[3]))
             return db, f"ok: prior {args[1]} ~ Beta({args[2]}, {args[3]})"
+        if cmd == ".rules":
+            if len(args) != 1:
+                raise QueryError("usage: .rules <effect>")
+            spec = db.effect(args[0])
+            lines = [f"{r.name}: x{r.multiplier:g}"
+                     + (f" for types {sorted(r.types)}" if r.types is not None else "")
+                     + ("" if r.predicate else " (type-level)")
+                     for r in spec.rules]
+            lines += [f"{n}: (pending; re-register after load)" for n in spec.pending_rules]
+            return db, "\n".join(lines) or "(no rules)"
+        if cmd == ".forget":
+            if len(args) not in (1, 2) or (len(args) == 2 and args[1].lower() != "scrub"):
+                raise QueryError("usage: .forget <entity> [scrub]")
+            out = db.forget_entity(args[0], scrub_global=len(args) == 2)
+            return db, "ok: forgot " + ", ".join(f"{v} {k}" for k, v in out.items())
         if cmd == ".events":
             evs = sorted(db.events(args[0] if args else None), key=lambda e: e.time)
             return db, "\n".join(f"{e.entity}: {e.short()}" for e in evs) or "(empty)"
@@ -85,7 +114,9 @@ def handle_line(db: HeapDB, line: str, clock: Callable[[], float]) -> tuple[Heap
             return db, f"ok: loaded {db!r}"
         raise QueryError(f"unknown command {cmd!r}; try .help")
     out = execute(db, line, clock=clock)
-    return db, format_result(out) if isinstance(out, QueryResult) else out
+    if isinstance(out, (QueryResult, CalibrationReport)):
+        return db, format_result(out)
+    return db, out
 
 
 def repl(db: HeapDB, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout,

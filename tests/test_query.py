@@ -2,9 +2,16 @@ import io
 
 import pytest
 
-from heapdb import HeapDB, LogNormalKernel, QueryError, execute, parse
+from heapdb import CalibrationReport, HeapDB, LogNormalKernel, QueryError, execute, format_result, parse
 from heapdb.cli import handle_line, repl
-from heapdb.query import FeedbackStmt, InsertStmt, TopCausesQuery, parse_duration, parse_time
+from heapdb.query import (
+    CalibrationQuery,
+    FeedbackStmt,
+    InsertStmt,
+    TopCausesQuery,
+    parse_duration,
+    parse_time,
+)
 
 H = 3600.0
 
@@ -70,7 +77,8 @@ def test_execute_roundtrip():
     assert res.top.explanation is not None
     msg = execute(db, f"FEEDBACK bloating FOR me AT now CONFIRMED {res.top.event.id}", clock)
     assert msg.startswith("ok")
-    assert db.effect("bloating").links.get("beans").alpha == 4
+    # Proportional credit: beans (0.75) takes r = 0.75 / (1 - 0.25 * 0.8) of it.
+    assert db.link("bloating", "beans", "me").alpha == pytest.approx(3 + 0.75 / 0.8)
 
 
 def test_cli_session(tmp_path):
@@ -103,3 +111,53 @@ def test_package_doctest():
     import heapdb
 
     assert doctest.testmod(heapdb).failed == 0
+
+
+def test_parse_group_and_calibration():
+    q = parse("TOP 5 CAUSES OF latency FOR checkout,payments,search AT 100 EXPLAIN")
+    assert q.is_group and q.entities == ("checkout", "payments", "search")
+    assert parse("TOP 1 CAUSE OF x FOR a").entities == ("a",)
+    c = parse("CALIBRATION OF bloating BINS 5")
+    assert isinstance(c, CalibrationQuery) and (c.effect, c.bins) == ("bloating", 5)
+    assert parse("calibration of x").bins == 10
+    s = parse("INSERT txn FOR acct ATTRS amount=5,currency=EUR,rate=1.5")
+    assert dict(s.attrs) == {"amount": 5, "currency": "EUR", "rate": 1.5}
+    assert s.weight is None
+    for bad in ("CALIBRATION bloating", "CALIBRATION OF x BINS 0", "INSERT t FOR a ATTRS amount",
+                "TOP 1 CAUSES OF x FOR ,"):
+        with pytest.raises(QueryError):
+            parse(bad)
+
+
+def test_execute_group_calibration_and_attrs():
+    db = HeapDB()
+    db.register_effect("latency", LogNormalKernel(H, 0.6), priors={"pool": (3, 1)})
+    db.register_event_type("deploy", weight=lambda a: a.get("lines", 1) / 100)
+    clock = lambda: 10 * H  # noqa: E731
+    msg = execute(db, "INSERT deploy FOR svc-a AT now-1h FEATURES pool ATTRS lines=250", clock)
+    assert "w=2.5" in msg
+    execute(db, "INSERT deploy FOR svc-b AT now-1h FEATURES ui", clock)
+    res = execute(db, "TOP 3 CAUSES OF latency FOR svc-a,svc-b AT now EXPLAIN", clock)
+    assert [c.entity for c in res] == ["svc-a", "svc-b"]
+    text = format_result(res)
+    assert "for entities svc-a,svc-b" in text and "1. svc-a: #1" in text
+    execute(db, "FEEDBACK latency FOR svc-a AT now CONFIRMED 1", clock)
+    rep = execute(db, "CALIBRATION OF latency BINS 4", clock)
+    assert isinstance(rep, CalibrationReport) and rep.n == 1
+    assert "Brier" in format_result(rep)
+
+
+def test_cli_rules_and_forget():
+    db = HeapDB()
+    db.register_effect("fx", LogNormalKernel(H, 0.6))
+    db.add_rule("fx", "small", lambda e: True, 0.3)
+    db.add_rule("fx", "cron", None, 0.1, types={"cron"})
+    _, out = handle_line(db, ".rules fx", clock=lambda: 0.0)
+    assert "small: x0.3" in out and "cron: x0.1 for types ['cron'] (type-level)" in out
+    db.insert("me", 0, "meal", {"a"})
+    _, out = handle_line(db, ".forget me scrub", clock=lambda: 0.0)
+    assert out.startswith("ok: forgot 1 events") and len(db) == 0
+    _, out = handle_line(db, "CALIBRATION OF fx", clock=lambda: 0.0)
+    assert "n=0" in out
+    _, out = handle_line(db, ".help", clock=lambda: 0.0)
+    assert "CALIBRATION OF" in out and "group query" in out
