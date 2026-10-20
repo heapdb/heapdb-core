@@ -1,0 +1,19 @@
+[package]
+name = "heapdb-python"
+description = "Python bindings (PyO3) for the HeapDB engine."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+heapdb.workspace = true
+pyo3.workspace = true
+serde_json.workspace = true
+indexmap.workspace = true

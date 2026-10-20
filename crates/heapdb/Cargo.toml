@@ -1,0 +1,22 @@
+[package]
+name = "heapdb"
+description = "HeapDB engine: ranked, explainable attribution over an append-only event stream (pop the most likely cause, right now)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+keywords = ["database", "attribution", "root-cause", "top-k", "causal"]
+categories = ["database-implementations", "algorithms"]
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+indexmap.workspace = true
+rustc-hash.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

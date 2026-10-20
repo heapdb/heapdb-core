@@ -1,0 +1,809 @@
+{
+ "version": 1,
+ "answers": [
+  {
+   "effect": "bloating",
+   "entity": "me",
+   "at": 20000.0,
+   "causes": [
+    [
+     10,
+     0.8754123101817737
+    ],
+    [
+     8,
+     0.5946105034033089
+    ],
+    [
+     12,
+     0.5326736809631067
+    ],
+    [
+     6,
+     0.5005270084077885
+    ],
+    [
+     4,
+     0.19763142511514853
+    ]
+   ],
+   "text": "Top causes of 'bloating' for me at t=20000:\n  1. #10 meal@15300 [beans,f4,oats] w=1           score=0.8754\n      lag 1.31h -> kernel 0.965 x weight 1 x link 0.907 [noisy-OR of beans=0.71 (a=5, b=2), f4=0.50 (a=4, b=4), oats=0.35 (a=3.50, b=6.50)]\n  2. #8 meal@11900 [f2,oats,rice] w=1.5           score=0.5946\n      lag 2.25h -> kernel 0.639 x weight 1.5 x link 0.621 [noisy-OR of oats=0.35 (a=3.50, b=6.50), rice=0.33 (a=3, b=6), f2=0.12 (a=1, b=7)]\n  3. #12 meal@18700 [f1,oats,rice] w=2            score=0.5327\n      lag 0.36h -> kernel 0.408 x weight 2 x link 0.653 [noisy-OR of oats=0.35 (a=3.50, b=6.50), rice=0.33 (a=3, b=6), f1=0.20 (a=1, b=4)]\n  4. #6 meal@8500 [f0,oats,rice] w=2              score=0.5005\n      lag 3.19h -> kernel 0.383 x weight 2 x link 0.653 [noisy-OR of oats=0.35 (a=3.50, b=6.50), rice=0.33 (a=3, b=6), f0=0.20 (a=1, b=4)]\n  5. #4 meal@5100 [beans,f3,oats] w=1             score=0.1976\n      lag 4.14h -> kernel 0.232 x weight 1 x link 0.851 [noisy-OR of beans=0.71 (a=5, b=2), oats=0.35 (a=3.50, b=6.50), f3=0.20 (a=1, b=4)]\n  [segments: 5 scanned / 1 pruned / 6 in window; events scored: 5]"
+  },
+  {
+   "effect": "bloating",
+   "entity": "me",
+   "at": 41000.0,
+   "causes": [
+    [
+     24,
+     0.8986346077394753
+    ],
+    [
+     22,
+     0.7805178932666155
+    ],
+    [
+     20,
+     0.6866350198239939
+    ],
+    [
+     18,
+     0.4346522212906829
+    ],
+    [
+     16,
+     0.1814254113382047
+    ]
+   ],
+   "text": "Top causes of 'bloating' for me at t=41000:\n  1. #24 meal@39100 [f3,oats,rice] w=2            score=0.8986\n      lag 0.53h -> kernel 0.688 x weight 2 x link 0.653 [noisy-OR of oats=0.35 (a=3.50, b=6.50), rice=0.33 (a=3, b=6), f3=0.20 (a=1, b=4)]\n  2. #22 meal@35700 [beans,f1,oats] w=1           score=0.7805\n      lag 1.47h -> kernel 0.917 x weight 1 x link 0.851 [noisy-OR of beans=0.71 (a=5, b=2), oats=0.35 (a=3.50, b=6.50), f1=0.20 (a=1, b=4)]\n  3. #20 meal@32300 [f4,oats,rice] w=1.5          score=0.6866\n      lag 2.42h -> kernel 0.584 x weight 1.5 x link 0.783 [noisy-OR of f4=0.50 (a=4, b=4), oats=0.35 (a=3.50, b=6.50), rice=0.33 (a=3, b=6)]\n  4. #18 meal@28900 [f2,oats,rice] w=2            score=0.4347\n      lag 3.36h -> kernel 0.350 x weight 2 x link 0.621 [noisy-OR of oats=0.35 (a=3.50, b=6.50), rice=0.33 (a=3, b=6), f2=0.12 (a=1, b=7)]\n  5. #16 meal@25500 [beans,f0,oats] w=1           score=0.1814\n      lag 4.31h -> kernel 0.213 x weight 1 x link 0.851 [noisy-OR of beans=0.71 (a=5, b=2), oats=0.35 (a=3.50, b=6.50), f0=0.20 (a=1, b=4)]\n  [segments: 5 scanned / 7 pruned / 12 in window; events scored: 5]"
+  },
+  {
+   "effect": "bloating",
+   "entity": "me",
+   "at": 70000.0,
+   "causes": [
+    [
+     40,
+     0.9066731283165792
+    ],
+    [
+     38,
+     0.6856458134555278
+    ],
+    [
+     36,
+     0.5821503475877731
+    ],
+    [
+     34,
+     0.22838943819801852
+    ],
+    [
+     30,
+     0.16556533827376121
+    ]
+   ],
+   "text": "Top causes of 'bloating' for me at t=70000:\n  1. #40 meal@66300 [beans,f4,oats] w=1           score=0.9067\n      lag 1.03h -> kernel 0.999 x weight 1 x link 0.907 [noisy-OR of beans=0.71 (a=5, b=2), f4=0.50 (a=4, b=4), oats=0.35 (a=3.50, b=6.50)]\n  2. #38 meal@62900 [f2,oats,rice] w=1.5          score=0.6856\n      lag 1.97h -> kernel 0.736 x weight 1.5 x link 0.621 [noisy-OR of oats=0.35 (a=3.50, b=6.50), rice=0.33 (a=3, b=6), f2=0.12 (a=1, b=7)]\n  3. #36 meal@59500 [f0,oats,rice] w=2            score=0.5822\n      lag 2.92h -> kernel 0.446 x weight 2 x link 0.653 [noisy-OR of oats=0.35 (a=3.50, b=6.50), rice=0.33 (a=3, b=6), f0=0.20 (a=1, b=4)]\n  4. #34 meal@56100 [beans,f3,oats] w=1           score=0.2284\n      lag 3.86h -> kernel 0.268 x weight 1 x link 0.851 [noisy-OR of beans=0.71 (a=5, b=2), oats=0.35 (a=3.50, b=6.50), f3=0.20 (a=1, b=4)]\n  5. #30 meal@49300 [f4,oats,rice] w=2            score=0.1656\n      lag 5.75h -> kernel 0.106 x weight 2 x link 0.783 [noisy-OR of f4=0.50 (a=4, b=4), oats=0.35 (a=3.50, b=6.50), rice=0.33 (a=3, b=6)]\n  [segments: 5 scanned / 15 pruned / 20 in window; events scored: 5]"
+  },
+  {
+   "effect": "bloating",
+   "entity": "you",
+   "at": 20000.0,
+   "causes": [
+    [
+     11,
+     0.9384557960381672
+    ],
+    [
+     9,
+     0.9266346234244851
+    ],
+    [
+     5,
+     0.32697964681436154
+    ],
+    [
+     3,
+     0.22673034021133964
+    ]
+   ],
+   "text": "Top causes of 'bloating' for you at t=20000:\n  1. #11 meal@17000 [f0,oats,rice] w=1.5          score=0.9385\n      lag 0.83h -> kernel 0.958 x weight 1.5 x link 0.653 [noisy-OR of oats=0.35 (a=3.50, b=6.50), rice=0.33 (a=3, b=6), f0=0.20 (a=1, b=4)]\n  2. #9 meal@13600 [dairy,f3,rice] w=2            score=0.9266\n      lag 1.78h -> kernel 0.808 x weight 2 x link 0.573 [noisy-OR of rice=0.33 (a=3, b=6), dairy=0.20 (a=1, b=4), f3=0.20 (a=1, b=4)]\n  3. #5 meal@6800 [dairy,f4,rice] w=1.5           score=0.3270\n      lag 3.67h -> kernel 0.297 x weight 1.5 x link 0.733 [noisy-OR of f4=0.50 (a=4, b=4), rice=0.33 (a=3, b=6), dairy=0.20 (a=1, b=4)]\n  4. #3 meal@3400 [f2,oats,rice] w=2              score=0.2267\n      lag 4.61h -> kernel 0.183 x weight 2 x link 0.621 [noisy-OR of oats=0.35 (a=3.50, b=6.50), rice=0.33 (a=3, b=6), f2=0.12 (a=1, b=7)]\n  [segments: 4 scanned / 3 pruned / 7 in window; events scored: 4]"
+  },
+  {
+   "effect": "bloating",
+   "entity": "you",
+   "at": 41000.0,
+   "causes": [
+    [
+     23,
+     0.9291972423557997
+    ],
+    [
+     21,
+     0.855910093773383
+    ],
+    [
+     15,
+     0.26333380061436235
+    ],
+    [
+     17,
+     0.23408157870134036
+    ],
+    [
+     11,
+     0.06879413048780408
+    ]
+   ],
+   "text": "Top causes of 'bloating' for you at t=41000:\n  1. #23 meal@37400 [f2,oats,rice] w=1.5          score=0.9292\n      lag 1.00h -> kernel 0.998 x weight 1.5 x link 0.621 [noisy-OR of oats=0.35 (a=3.50, b=6.50), rice=0.33 (a=3, b=6), f2=0.12 (a=1, b=7)]\n  2. #21 meal@34000 [dairy,f0,rice] w=2           score=0.8559\n      lag 1.94h -> kernel 0.746 x weight 2 x link 0.573 [noisy-OR of rice=0.33 (a=3, b=6), dairy=0.20 (a=1, b=4), f0=0.20 (a=1, b=4)]\n  3. #15 meal@23800 [f4,oats,rice] w=2            score=0.2633\n      lag 4.78h -> kernel 0.168 x weight 2 x link 0.783 [noisy-OR of f4=0.50 (a=4, b=4), oats=0.35 (a=3.50, b=6.50), rice=0.33 (a=3, b=6)]\n  4. #17 meal@27200 [dairy,f1,rice] w=1.5         score=0.2341\n      lag 3.83h -> kernel 0.272 x weight 1.5 x link 0.573 [noisy-OR of rice=0.33 (a=3, b=6), dairy=0.20 (a=1, b=4), f1=0.20 (a=1, b=4)]\n  5. #11 meal@17000 [f0,oats,rice] w=1.5          score=0.0688\n      lag 6.67h -> kernel 0.070 x weight 1.5 x link 0.653 [noisy-OR of oats=0.35 (a=3.50, b=6.50), rice=0.33 (a=3, b=6), f0=0.20 (a=1, b=4)]\n  [segments: 5 scanned / 8 pruned / 13 in window; events scored: 5]"
+  },
+  {
+   "effect": "bloating",
+   "entity": "you",
+   "at": 70000.0,
+   "causes": [
+    [
+     39,
+     1.1859029007469657
+    ],
+    [
+     35,
+     0.40520793781423753
+    ],
+    [
+     33,
+     0.22409162380890518
+    ],
+    [
+     27,
+     0.07416879530579536
+    ],
+    [
+     29,
+     0.0733734580076743
+    ]
+   ],
+   "text": "Top causes of 'bloating' for you at t=70000:\n  1. #39 meal@64600 [f3,oats,rice] w=2            score=1.1859\n      lag 1.50h -> kernel 0.908 x weight 2 x link 0.653 [noisy-OR of oats=0.35 (a=3.50, b=6.50), rice=0.33 (a=3, b=6), f3=0.20 (a=1, b=4)]\n  2. #35 meal@57800 [f4,oats,rice] w=1.5          score=0.4052\n      lag 3.39h -> kernel 0.345 x weight 1.5 x link 0.783 [noisy-OR of f4=0.50 (a=4, b=4), oats=0.35 (a=3.50, b=6.50), rice=0.33 (a=3, b=6)]\n  3. #33 meal@54400 [dairy,f2,rice] w=2           score=0.2241\n      lag 4.33h -> kernel 0.210 x weight 2 x link 0.533 [noisy-OR of rice=0.33 (a=3, b=6), dairy=0.20 (a=1, b=4), f2=0.12 (a=1, b=7)]\n  4. #27 meal@44200 [f1,oats,rice] w=2            score=0.0742\n      lag 7.17h -> kernel 0.057 x weight 2 x link 0.653 [noisy-OR of oats=0.35 (a=3.50, b=6.50), rice=0.33 (a=3, b=6), f1=0.20 (a=1, b=4)]\n  5. #29 meal@47600 [dairy,f3,rice] w=1.5         score=0.0734\n      lag 6.22h -> kernel 0.085 x weight 1.5 x link 0.573 [noisy-OR of rice=0.33 (a=3, b=6), dairy=0.20 (a=1, b=4), f3=0.20 (a=1, b=4)]\n  [segments: 5 scanned / 15 pruned / 20 in window; events scored: 5]"
+  },
+  {
+   "effect": "latency",
+   "entity": "me",
+   "at": 20000.0,
+   "causes": [
+    [
+     12,
+     0.5916151206050095
+    ],
+    [
+     10,
+     0.07987245908567335
+    ],
+    [
+     8,
+     0.032350135239284546
+    ],
+    [
+     6,
+     0.011646692873224148
+    ],
+    [
+     4,
+     0.0015723905079516691
+    ]
+   ],
+   "text": "Top causes of 'latency' for me at t=20000:\n  1. #12 meal@18700 [f1,oats,rice] w=2            score=0.5916\n      lag 0.36h -> kernel 0.606 x weight 2 x link 0.488 [noisy-OR of f1=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  2. #10 meal@15300 [beans,f4,oats] w=1           score=0.0799\n      lag 1.31h -> kernel 0.164 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f4=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  3. #8 meal@11900 [f2,oats,rice] w=1.5           score=0.0324\n      lag 2.25h -> kernel 0.044 x weight 1.5 x link 0.488 [noisy-OR of f2=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  4. #6 meal@8500 [f0,oats,rice] w=2              score=0.0116\n      lag 3.19h -> kernel 0.012 x weight 2 x link 0.488 [noisy-OR of f0=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  5. #4 meal@5100 [beans,f3,oats] w=1             score=0.0016\n      lag 4.14h -> kernel 0.003 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f3=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  [segments: 5 scanned / 0 pruned / 5 in window; events scored: 5]"
+  },
+  {
+   "effect": "latency",
+   "entity": "me",
+   "at": 41000.0,
+   "causes": [
+    [
+     24,
+     0.4695652324043427
+    ],
+    [
+     22,
+     0.06339481278794241
+    ],
+    [
+     20,
+     0.02567631935507691
+    ],
+    [
+     18,
+     0.009243986259453274
+    ],
+    [
+     16,
+     0.0012480071732136465
+    ]
+   ],
+   "text": "Top causes of 'latency' for me at t=41000:\n  1. #24 meal@39100 [f3,oats,rice] w=2            score=0.4696\n      lag 0.53h -> kernel 0.481 x weight 2 x link 0.488 [noisy-OR of f3=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  2. #22 meal@35700 [beans,f1,oats] w=1           score=0.0634\n      lag 1.47h -> kernel 0.130 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f1=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  3. #20 meal@32300 [f4,oats,rice] w=1.5          score=0.0257\n      lag 2.42h -> kernel 0.035 x weight 1.5 x link 0.488 [noisy-OR of f4=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  4. #18 meal@28900 [f2,oats,rice] w=2            score=0.0092\n      lag 3.36h -> kernel 0.009 x weight 2 x link 0.488 [noisy-OR of f2=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  5. #16 meal@25500 [beans,f0,oats] w=1           score=0.0012\n      lag 4.31h -> kernel 0.003 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f0=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  [segments: 5 scanned / 0 pruned / 5 in window; events scored: 5]"
+  },
+  {
+   "effect": "latency",
+   "entity": "me",
+   "at": 70000.0,
+   "causes": [
+    [
+     40,
+     0.1173913081010857
+    ],
+    [
+     38,
+     0.04754610959095681
+    ],
+    [
+     36,
+     0.017117546236717938
+    ],
+    [
+     34,
+     0.0023109965648633185
+    ],
+    [
+     32,
+     0.0009360053799102348
+    ]
+   ],
+   "text": "Top causes of 'latency' for me at t=70000:\n  1. #40 meal@66300 [beans,f4,oats] w=1           score=0.1174\n      lag 1.03h -> kernel 0.241 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f4=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  2. #38 meal@62900 [f2,oats,rice] w=1.5          score=0.0475\n      lag 1.97h -> kernel 0.065 x weight 1.5 x link 0.488 [noisy-OR of f2=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  3. #36 meal@59500 [f0,oats,rice] w=2            score=0.0171\n      lag 2.92h -> kernel 0.018 x weight 2 x link 0.488 [noisy-OR of f0=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  4. #34 meal@56100 [beans,f3,oats] w=1           score=0.0023\n      lag 3.86h -> kernel 0.005 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f3=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  5. #32 meal@52700 [f1,oats,rice] w=1.5          score=0.0009\n      lag 4.81h -> kernel 0.001 x weight 1.5 x link 0.488 [noisy-OR of f1=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  [segments: 5 scanned / 0 pruned / 5 in window; events scored: 5]"
+  },
+  {
+   "effect": "latency",
+   "entity": "you",
+   "at": 20000.0,
+   "causes": [
+    [
+     11,
+     0.23056555213076171
+    ],
+    [
+     9,
+     0.08300819001063699
+    ],
+    [
+     7,
+     0.011206725503601437
+    ],
+    [
+     5,
+     0.004538974882971569
+    ],
+    [
+     3,
+     0.0016341213423136706
+    ]
+   ],
+   "text": "Top causes of 'latency' for you at t=20000:\n  1. #11 meal@17000 [f0,oats,rice] w=1.5          score=0.2306\n      lag 0.83h -> kernel 0.315 x weight 1.5 x link 0.488 [noisy-OR of f0=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  2. #9 meal@13600 [dairy,f3,rice] w=2            score=0.0830\n      lag 1.78h -> kernel 0.085 x weight 2 x link 0.488 [noisy-OR of dairy=0.20 (a=1, b=4), f3=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  3. #7 snack@10200 [beans,f1,oats] w=1           score=0.0112\n      lag 2.72h -> kernel 0.023 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f1=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  4. #5 meal@6800 [dairy,f4,rice] w=1.5           score=0.0045\n      lag 3.67h -> kernel 0.006 x weight 1.5 x link 0.488 [noisy-OR of dairy=0.20 (a=1, b=4), f4=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  5. #3 meal@3400 [f2,oats,rice] w=2              score=0.0016\n      lag 4.61h -> kernel 0.002 x weight 2 x link 0.488 [noisy-OR of f2=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  [segments: 5 scanned / 1 pruned / 6 in window; events scored: 5]"
+  },
+  {
+   "effect": "latency",
+   "entity": "you",
+   "at": 41000.0,
+   "causes": [
+    [
+     25,
+     0.4518268595961976
+    ],
+    [
+     23,
+     0.18299999999999994
+    ],
+    [
+     21,
+     0.06588364407243065
+    ],
+    [
+     19,
+     0.008894783926767888
+    ],
+    [
+     17,
+     0.0036025867520431513
+    ]
+   ],
+   "text": "Top causes of 'latency' for you at t=41000:\n  1. #25 snack@40800 [beans,dairy,f4] w=1         score=0.4518\n      lag 0.06h -> kernel 0.926 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), dairy=0.20 (a=1, b=4), f4=0.20 (a=1, b=4)]\n  2. #23 meal@37400 [f2,oats,rice] w=1.5          score=0.1830\n      lag 1.00h -> kernel 0.250 x weight 1.5 x link 0.488 [noisy-OR of f2=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  3. #21 meal@34000 [dairy,f0,rice] w=2           score=0.0659\n      lag 1.94h -> kernel 0.068 x weight 2 x link 0.488 [noisy-OR of dairy=0.20 (a=1, b=4), f0=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  4. #19 snack@30600 [beans,f3,oats] w=1          score=0.0089\n      lag 2.89h -> kernel 0.018 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f3=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  5. #17 meal@27200 [dairy,f1,rice] w=1.5         score=0.0036\n      lag 3.83h -> kernel 0.005 x weight 1.5 x link 0.488 [noisy-OR of dairy=0.20 (a=1, b=4), f1=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  [segments: 5 scanned / 1 pruned / 6 in window; events scored: 5]"
+  },
+  {
+   "effect": "latency",
+   "entity": "you",
+   "at": 70000.0,
+   "causes": [
+    [
+     39,
+     0.12199999999999997
+    ],
+    [
+     37,
+     0.01647091101810766
+    ],
+    [
+     35,
+     0.006671087945075916
+    ],
+    [
+     33,
+     0.002401724501362102
+    ]
+   ],
+   "text": "Top causes of 'latency' for you at t=70000:\n  1. #39 meal@64600 [f3,oats,rice] w=2            score=0.1220\n      lag 1.50h -> kernel 0.125 x weight 2 x link 0.488 [noisy-OR of f3=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  2. #37 snack@61200 [beans,dairy,f1] w=1         score=0.0165\n      lag 2.44h -> kernel 0.034 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), dairy=0.20 (a=1, b=4), f1=0.20 (a=1, b=4)]\n  3. #35 meal@57800 [f4,oats,rice] w=1.5          score=0.0067\n      lag 3.39h -> kernel 0.009 x weight 1.5 x link 0.488 [noisy-OR of f4=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  4. #33 meal@54400 [dairy,f2,rice] w=2           score=0.0024\n      lag 4.33h -> kernel 0.002 x weight 2 x link 0.488 [noisy-OR of dairy=0.20 (a=1, b=4), f2=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  [segments: 4 scanned / 0 pruned / 4 in window; events scored: 4]"
+  },
+  {
+   "effect": "incident",
+   "entity": "me",
+   "at": 20000.0,
+   "causes": [
+    [
+     12,
+     0.9759999999999998
+    ],
+    [
+     6,
+     0.9759999999999998
+    ],
+    [
+     8,
+     0.7319999999999998
+    ],
+    [
+     2,
+     0.7319999999999998
+    ],
+    [
+     10,
+     0.4879999999999999
+    ]
+   ],
+   "text": "Top causes of 'incident' for me at t=20000:\n  1. #12 meal@18700 [f1,oats,rice] w=2            score=0.9760\n      lag 0.36h -> kernel 1.000 x weight 2 x link 0.488 [noisy-OR of f1=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  2. #6 meal@8500 [f0,oats,rice] w=2              score=0.9760\n      lag 3.19h -> kernel 1.000 x weight 2 x link 0.488 [noisy-OR of f0=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  3. #8 meal@11900 [f2,oats,rice] w=1.5           score=0.7320\n      lag 2.25h -> kernel 1.000 x weight 1.5 x link 0.488 [noisy-OR of f2=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  4. #2 meal@1700 [f1,oats,rice] w=1.5            score=0.7320\n      lag 5.08h -> kernel 1.000 x weight 1.5 x link 0.488 [noisy-OR of f1=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  5. #10 meal@15300 [beans,f4,oats] w=1           score=0.4880\n      lag 1.31h -> kernel 1.000 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f4=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  [segments: 6 scanned / 0 pruned / 6 in window; events scored: 6]"
+  },
+  {
+   "effect": "incident",
+   "entity": "me",
+   "at": 41000.0,
+   "causes": [
+    [
+     24,
+     0.9759999999999998
+    ],
+    [
+     18,
+     0.9759999999999998
+    ],
+    [
+     20,
+     0.7319999999999998
+    ],
+    [
+     14,
+     0.7319999999999998
+    ],
+    [
+     22,
+     0.4879999999999999
+    ]
+   ],
+   "text": "Top causes of 'incident' for me at t=41000:\n  1. #24 meal@39100 [f3,oats,rice] w=2            score=0.9760\n      lag 0.53h -> kernel 1.000 x weight 2 x link 0.488 [noisy-OR of f3=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  2. #18 meal@28900 [f2,oats,rice] w=2            score=0.9760\n      lag 3.36h -> kernel 1.000 x weight 2 x link 0.488 [noisy-OR of f2=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  3. #20 meal@32300 [f4,oats,rice] w=1.5          score=0.7320\n      lag 2.42h -> kernel 1.000 x weight 1.5 x link 0.488 [noisy-OR of f4=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  4. #14 meal@22100 [f3,oats,rice] w=1.5          score=0.7320\n      lag 5.25h -> kernel 1.000 x weight 1.5 x link 0.488 [noisy-OR of f3=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  5. #22 meal@35700 [beans,f1,oats] w=1           score=0.4880\n      lag 1.47h -> kernel 1.000 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f1=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  [segments: 6 scanned / 0 pruned / 6 in window; events scored: 6]"
+  },
+  {
+   "effect": "incident",
+   "entity": "me",
+   "at": 70000.0,
+   "causes": [
+    [
+     36,
+     0.9759999999999998
+    ],
+    [
+     30,
+     0.9759999999999998
+    ],
+    [
+     38,
+     0.7319999999999998
+    ],
+    [
+     32,
+     0.7319999999999998
+    ],
+    [
+     40,
+     0.4879999999999999
+    ]
+   ],
+   "text": "Top causes of 'incident' for me at t=70000:\n  1. #36 meal@59500 [f0,oats,rice] w=2            score=0.9760\n      lag 2.92h -> kernel 1.000 x weight 2 x link 0.488 [noisy-OR of f0=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  2. #30 meal@49300 [f4,oats,rice] w=2            score=0.9760\n      lag 5.75h -> kernel 1.000 x weight 2 x link 0.488 [noisy-OR of f4=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  3. #38 meal@62900 [f2,oats,rice] w=1.5          score=0.7320\n      lag 1.97h -> kernel 1.000 x weight 1.5 x link 0.488 [noisy-OR of f2=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  4. #32 meal@52700 [f1,oats,rice] w=1.5          score=0.7320\n      lag 4.81h -> kernel 1.000 x weight 1.5 x link 0.488 [noisy-OR of f1=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  5. #40 meal@66300 [beans,f4,oats] w=1           score=0.4880\n      lag 1.03h -> kernel 1.000 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f4=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  [segments: 6 scanned / 0 pruned / 6 in window; events scored: 6]"
+  },
+  {
+   "effect": "incident",
+   "entity": "you",
+   "at": 20000.0,
+   "causes": [
+    [
+     9,
+     0.9759999999999998
+    ],
+    [
+     3,
+     0.9759999999999998
+    ],
+    [
+     11,
+     0.7319999999999998
+    ],
+    [
+     5,
+     0.7319999999999998
+    ],
+    [
+     7,
+     0.4879999999999999
+    ]
+   ],
+   "text": "Top causes of 'incident' for you at t=20000:\n  1. #9 meal@13600 [dairy,f3,rice] w=2            score=0.9760\n      lag 1.78h -> kernel 1.000 x weight 2 x link 0.488 [noisy-OR of dairy=0.20 (a=1, b=4), f3=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  2. #3 meal@3400 [f2,oats,rice] w=2              score=0.9760\n      lag 4.61h -> kernel 1.000 x weight 2 x link 0.488 [noisy-OR of f2=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  3. #11 meal@17000 [f0,oats,rice] w=1.5          score=0.7320\n      lag 0.83h -> kernel 1.000 x weight 1.5 x link 0.488 [noisy-OR of f0=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  4. #5 meal@6800 [dairy,f4,rice] w=1.5           score=0.7320\n      lag 3.67h -> kernel 1.000 x weight 1.5 x link 0.488 [noisy-OR of dairy=0.20 (a=1, b=4), f4=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  5. #7 snack@10200 [beans,f1,oats] w=1           score=0.4880\n      lag 2.72h -> kernel 1.000 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f1=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  [segments: 6 scanned / 1 pruned / 7 in window; events scored: 6]"
+  },
+  {
+   "effect": "incident",
+   "entity": "you",
+   "at": 41000.0,
+   "causes": [
+    [
+     21,
+     0.9759999999999998
+    ],
+    [
+     15,
+     0.9759999999999998
+    ],
+    [
+     23,
+     0.7319999999999998
+    ],
+    [
+     17,
+     0.7319999999999998
+    ],
+    [
+     25,
+     0.4879999999999999
+    ]
+   ],
+   "text": "Top causes of 'incident' for you at t=41000:\n  1. #21 meal@34000 [dairy,f0,rice] w=2           score=0.9760\n      lag 1.94h -> kernel 1.000 x weight 2 x link 0.488 [noisy-OR of dairy=0.20 (a=1, b=4), f0=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  2. #15 meal@23800 [f4,oats,rice] w=2            score=0.9760\n      lag 4.78h -> kernel 1.000 x weight 2 x link 0.488 [noisy-OR of f4=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  3. #23 meal@37400 [f2,oats,rice] w=1.5          score=0.7320\n      lag 1.00h -> kernel 1.000 x weight 1.5 x link 0.488 [noisy-OR of f2=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  4. #17 meal@27200 [dairy,f1,rice] w=1.5         score=0.7320\n      lag 3.83h -> kernel 1.000 x weight 1.5 x link 0.488 [noisy-OR of dairy=0.20 (a=1, b=4), f1=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  5. #25 snack@40800 [beans,dairy,f4] w=1         score=0.4880\n      lag 0.06h -> kernel 1.000 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), dairy=0.20 (a=1, b=4), f4=0.20 (a=1, b=4)]\n  [segments: 7 scanned / 0 pruned / 7 in window; events scored: 7]"
+  },
+  {
+   "effect": "incident",
+   "entity": "you",
+   "at": 70000.0,
+   "causes": [
+    [
+     39,
+     0.9759999999999998
+    ],
+    [
+     33,
+     0.9759999999999998
+    ],
+    [
+     35,
+     0.7319999999999998
+    ],
+    [
+     37,
+     0.4879999999999999
+    ],
+    [
+     31,
+     0.4879999999999999
+    ]
+   ],
+   "text": "Top causes of 'incident' for you at t=70000:\n  1. #39 meal@64600 [f3,oats,rice] w=2            score=0.9760\n      lag 1.50h -> kernel 1.000 x weight 2 x link 0.488 [noisy-OR of f3=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  2. #33 meal@54400 [dairy,f2,rice] w=2           score=0.9760\n      lag 4.33h -> kernel 1.000 x weight 2 x link 0.488 [noisy-OR of dairy=0.20 (a=1, b=4), f2=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  3. #35 meal@57800 [f4,oats,rice] w=1.5          score=0.7320\n      lag 3.39h -> kernel 1.000 x weight 1.5 x link 0.488 [noisy-OR of f4=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  4. #37 snack@61200 [beans,dairy,f1] w=1         score=0.4880\n      lag 2.44h -> kernel 1.000 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), dairy=0.20 (a=1, b=4), f1=0.20 (a=1, b=4)]\n  5. #31 snack@51000 [beans,f0,oats] w=1          score=0.4880\n      lag 5.28h -> kernel 1.000 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f0=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  [segments: 5 scanned / 0 pruned / 5 in window; events scored: 5]"
+  },
+  {
+   "effect": "headache",
+   "entity": "me",
+   "at": 20000.0,
+   "causes": [
+    [
+     12,
+     0.7097473782050933
+    ],
+    [
+     10,
+     0.3689534182624127
+    ],
+    [
+     8,
+     0.18936927541280824
+    ],
+    [
+     6,
+     0.0646001408458558
+    ],
+    [
+     4,
+     0.007204470873678987
+    ]
+   ],
+   "text": "Top causes of 'headache' for me at t=20000:\n  1. #12 meal@18700 [f1,oats,rice] w=2            score=0.7097\n      lag 0.36h -> kernel 0.727 x weight 2 x link 0.488 [noisy-OR of f1=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  2. #10 meal@15300 [beans,f4,oats] w=1           score=0.3690\n      lag 1.31h -> kernel 0.756 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f4=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  3. #8 meal@11900 [f2,oats,rice] w=1.5           score=0.1894\n      lag 2.25h -> kernel 0.259 x weight 1.5 x link 0.488 [noisy-OR of f2=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  4. #6 meal@8500 [f0,oats,rice] w=2              score=0.0646\n      lag 3.19h -> kernel 0.066 x weight 2 x link 0.488 [noisy-OR of f0=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  5. #4 meal@5100 [beans,f3,oats] w=1             score=0.0072\n      lag 4.14h -> kernel 0.015 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f3=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  [segments: 5 scanned / 1 pruned / 6 in window; events scored: 5]"
+  },
+  {
+   "effect": "headache",
+   "entity": "me",
+   "at": 41000.0,
+   "causes": [
+    [
+     24,
+     0.8985750228297646
+    ],
+    [
+     22,
+     0.31657289554103646
+    ],
+    [
+     20,
+     0.15104141331903245
+    ],
+    [
+     18,
+     0.049957412055203286
+    ],
+    [
+     16,
+     0.005477159740747799
+    ]
+   ],
+   "text": "Top causes of 'headache' for me at t=41000:\n  1. #24 meal@39100 [f3,oats,rice] w=2            score=0.8986\n      lag 0.53h -> kernel 0.921 x weight 2 x link 0.488 [noisy-OR of f3=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  2. #22 meal@35700 [beans,f1,oats] w=1           score=0.3166\n      lag 1.47h -> kernel 0.649 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f1=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  3. #20 meal@32300 [f4,oats,rice] w=1.5          score=0.1510\n      lag 2.42h -> kernel 0.206 x weight 1.5 x link 0.488 [noisy-OR of f4=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  4. #18 meal@28900 [f2,oats,rice] w=2            score=0.0500\n      lag 3.36h -> kernel 0.051 x weight 2 x link 0.488 [noisy-OR of f2=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  5. #16 meal@25500 [beans,f0,oats] w=1           score=0.0055\n      lag 4.31h -> kernel 0.011 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f0=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  [segments: 5 scanned / 1 pruned / 6 in window; events scored: 5]"
+  },
+  {
+   "effect": "headache",
+   "entity": "me",
+   "at": 70000.0,
+   "causes": [
+    [
+     40,
+     0.44916100996124436
+    ],
+    [
+     38,
+     0.2708595947517923
+    ],
+    [
+     36,
+     0.09823027618609328
+    ],
+    [
+     34,
+     0.011314089238389929
+    ],
+    [
+     32,
+     0.0035638859038655277
+    ]
+   ],
+   "text": "Top causes of 'headache' for me at t=70000:\n  1. #40 meal@66300 [beans,f4,oats] w=1           score=0.4492\n      lag 1.03h -> kernel 0.920 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f4=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  2. #38 meal@62900 [f2,oats,rice] w=1.5          score=0.2709\n      lag 1.97h -> kernel 0.370 x weight 1.5 x link 0.488 [noisy-OR of f2=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  3. #36 meal@59500 [f0,oats,rice] w=2            score=0.0982\n      lag 2.92h -> kernel 0.101 x weight 2 x link 0.488 [noisy-OR of f0=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  4. #34 meal@56100 [beans,f3,oats] w=1           score=0.0113\n      lag 3.86h -> kernel 0.023 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f3=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  5. #32 meal@52700 [f1,oats,rice] w=1.5          score=0.0036\n      lag 4.81h -> kernel 0.005 x weight 1.5 x link 0.488 [noisy-OR of f1=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  [segments: 5 scanned / 1 pruned / 6 in window; events scored: 5]"
+  },
+  {
+   "effect": "headache",
+   "entity": "you",
+   "at": 20000.0,
+   "causes": [
+    [
+     11,
+     0.7257130006671355
+    ],
+    [
+     9,
+     0.4559924976652475
+    ],
+    [
+     7,
+     0.06533754811252906
+    ],
+    [
+     5,
+     0.02317084403027774
+    ],
+    [
+     3,
+     0.00658942932547027
+    ]
+   ],
+   "text": "Top causes of 'headache' for you at t=20000:\n  1. #11 meal@17000 [f0,oats,rice] w=1.5          score=0.7257\n      lag 0.83h -> kernel 0.991 x weight 1.5 x link 0.488 [noisy-OR of f0=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  2. #9 meal@13600 [dairy,f3,rice] w=2            score=0.4560\n      lag 1.78h -> kernel 0.467 x weight 2 x link 0.488 [noisy-OR of dairy=0.20 (a=1, b=4), f3=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  3. #7 snack@10200 [beans,f1,oats] w=1           score=0.0653\n      lag 2.72h -> kernel 0.134 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f1=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  4. #5 meal@6800 [dairy,f4,rice] w=1.5           score=0.0232\n      lag 3.67h -> kernel 0.032 x weight 1.5 x link 0.488 [noisy-OR of dairy=0.20 (a=1, b=4), f4=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  5. #3 meal@3400 [f2,oats,rice] w=2              score=0.0066\n      lag 4.61h -> kernel 0.007 x weight 2 x link 0.488 [noisy-OR of f2=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  [segments: 5 scanned / 2 pruned / 7 in window; events scored: 5]"
+  },
+  {
+   "effect": "headache",
+   "entity": "you",
+   "at": 41000.0,
+   "causes": [
+    [
+     23,
+     0.6835526086101703
+    ],
+    [
+     21,
+     0.3737403337864602
+    ],
+    [
+     19,
+     0.05118101578206285
+    ],
+    [
+     25,
+     0.039455354489082585
+    ],
+    [
+     17,
+     0.017747400882131868
+    ]
+   ],
+   "text": "Top causes of 'headache' for you at t=41000:\n  1. #23 meal@37400 [f2,oats,rice] w=1.5          score=0.6836\n      lag 1.00h -> kernel 0.934 x weight 1.5 x link 0.488 [noisy-OR of f2=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  2. #21 meal@34000 [dairy,f0,rice] w=2           score=0.3737\n      lag 1.94h -> kernel 0.383 x weight 2 x link 0.488 [noisy-OR of dairy=0.20 (a=1, b=4), f0=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  3. #19 snack@30600 [beans,f3,oats] w=1          score=0.0512\n      lag 2.89h -> kernel 0.105 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f3=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  4. #25 snack@40800 [beans,dairy,f4] w=1         score=0.0395\n      lag 0.06h -> kernel 0.081 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), dairy=0.20 (a=1, b=4), f4=0.20 (a=1, b=4)]\n  5. #17 meal@27200 [dairy,f1,rice] w=1.5         score=0.0177\n      lag 3.83h -> kernel 0.024 x weight 1.5 x link 0.488 [noisy-OR of dairy=0.20 (a=1, b=4), f1=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  [segments: 5 scanned / 2 pruned / 7 in window; events scored: 5]"
+  },
+  {
+   "effect": "headache",
+   "entity": "you",
+   "at": 70000.0,
+   "causes": [
+    [
+     39,
+     0.6159608197772741
+    ],
+    [
+     37,
+     0.09689970162388185
+    ],
+    [
+     35,
+     0.035883551114776334
+    ],
+    [
+     33,
+     0.010462784539912439
+    ],
+    [
+     31,
+     0.00106347373599396
+    ]
+   ],
+   "text": "Top causes of 'headache' for you at t=70000:\n  1. #39 meal@64600 [f3,oats,rice] w=2            score=0.6160\n      lag 1.50h -> kernel 0.631 x weight 2 x link 0.488 [noisy-OR of f3=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  2. #37 snack@61200 [beans,dairy,f1] w=1         score=0.0969\n      lag 2.44h -> kernel 0.199 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), dairy=0.20 (a=1, b=4), f1=0.20 (a=1, b=4)]\n  3. #35 meal@57800 [f4,oats,rice] w=1.5          score=0.0359\n      lag 3.39h -> kernel 0.049 x weight 1.5 x link 0.488 [noisy-OR of f4=0.20 (a=1, b=4), oats=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  4. #33 meal@54400 [dairy,f2,rice] w=2           score=0.0105\n      lag 4.33h -> kernel 0.011 x weight 2 x link 0.488 [noisy-OR of dairy=0.20 (a=1, b=4), f2=0.20 (a=1, b=4), rice=0.20 (a=1, b=4)]\n  5. #31 snack@51000 [beans,f0,oats] w=1          score=0.0011\n      lag 5.28h -> kernel 0.002 x weight 1 x link 0.488 [noisy-OR of beans=0.20 (a=1, b=4), f0=0.20 (a=1, b=4), oats=0.20 (a=1, b=4)]\n  [segments: 5 scanned / 0 pruned / 5 in window; events scored: 5]"
+  }
+ ],
+ "links": {
+  "bloating|beans|": [
+   5.0,
+   2.0
+  ],
+  "bloating|beans|me": [
+   5.0,
+   2.0
+  ],
+  "bloating|beans|you": [
+   5.0,
+   2.0
+  ],
+  "bloating|beans|new": [
+   5.0,
+   2.0
+  ],
+  "bloating|rice|": [
+   3.0,
+   6.0
+  ],
+  "bloating|rice|me": [
+   3.0,
+   6.0
+  ],
+  "bloating|rice|you": [
+   3.0,
+   6.0
+  ],
+  "bloating|rice|new": [
+   3.0,
+   6.0
+  ],
+  "bloating|f0|": [
+   1.0,
+   4.0
+  ],
+  "bloating|f0|me": [
+   1.0,
+   4.0
+  ],
+  "bloating|f0|you": [
+   1.0,
+   4.0
+  ],
+  "bloating|f0|new": [
+   1.0,
+   4.0
+  ],
+  "bloating|dairy|": [
+   1.0,
+   4.0
+  ],
+  "bloating|dairy|me": [
+   1.0,
+   4.0
+  ],
+  "bloating|dairy|you": [
+   1.0,
+   4.0
+  ],
+  "bloating|dairy|new": [
+   1.0,
+   4.0
+  ],
+  "latency|beans|": [
+   1.0,
+   4.0
+  ],
+  "latency|beans|me": [
+   1.0,
+   4.0
+  ],
+  "latency|beans|you": [
+   1.0,
+   4.0
+  ],
+  "latency|beans|new": [
+   1.0,
+   4.0
+  ],
+  "latency|rice|": [
+   1.0,
+   4.0
+  ],
+  "latency|rice|me": [
+   1.0,
+   4.0
+  ],
+  "latency|rice|you": [
+   1.0,
+   4.0
+  ],
+  "latency|rice|new": [
+   1.0,
+   4.0
+  ],
+  "latency|f0|": [
+   1.0,
+   4.0
+  ],
+  "latency|f0|me": [
+   1.0,
+   4.0
+  ],
+  "latency|f0|you": [
+   1.0,
+   4.0
+  ],
+  "latency|f0|new": [
+   1.0,
+   4.0
+  ],
+  "latency|dairy|": [
+   1.0,
+   4.0
+  ],
+  "latency|dairy|me": [
+   1.0,
+   4.0
+  ],
+  "latency|dairy|you": [
+   1.0,
+   4.0
+  ],
+  "latency|dairy|new": [
+   1.0,
+   4.0
+  ]
+ },
+ "meta": {
+  "pending_event_types": [],
+  "pending_rules": {
+   "bloating": [],
+   "headache": [],
+   "incident": [],
+   "latency": []
+  },
+  "next_id": 41
+ }
+}

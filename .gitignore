@@ -13,3 +13,6 @@ htmlcov/
 venv/
 *.jsonl
 .DS_Store
+target/
+*.so
+*.pyd

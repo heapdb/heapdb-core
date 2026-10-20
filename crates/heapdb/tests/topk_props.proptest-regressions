@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc d4109b527f7964f23ed6b0dd539f622c810cec758ea1deb9e9673350ca7de0e3 # shrinks to s = Setup { kernel: 0, bucket: 300.0, max_sets: 64, cause_types: false, hierarchical: false, priors: [], pred_rule: false, type_rule: false, block_rule: true, events: [Ev { entity: 0, time: 0.0, ty: 0, feats: [], weight: 0.05, amount: 1 }] }, at = 0.0

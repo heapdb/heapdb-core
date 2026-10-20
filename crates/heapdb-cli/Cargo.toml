@@ -1,0 +1,15 @@
+[package]
+name = "heapdb-cli"
+description = "HeapDB command-line REPL and query-file runner."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "heapdb"
+path = "src/main.rs"
+
+[dependencies]
+heapdb.workspace = true

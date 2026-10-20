@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = ["crates/heapdb", "crates/heapdb-cli", "bindings/python"]
+default-members = ["crates/heapdb", "crates/heapdb-cli"]
+
+[workspace.package]
+version = "0.5.0"
+edition = "2021"
+license = "Apache-2.0"
+rust-version = "1.82"
+repository = "https://github.com/heapdb/heapdb-core"
+
+[workspace.dependencies]
+heapdb = { path = "crates/heapdb", version = "0.5.0" }
+thiserror = "2.0.21"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.145", features = ["preserve_order", "float_roundtrip"] }
+indexmap = { version = "2.11", features = ["serde"] }
+rustc-hash = "2.1"
+chrono = { version = "0.4.42", default-features = false, features = ["clock", "std"] }
+proptest = "1.8"
+pyo3 = { version = "0.29.3", features = ["abi3-py310"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
