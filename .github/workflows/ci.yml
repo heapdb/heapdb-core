@@ -62,7 +62,25 @@ jobs:
         run: |
           python -m pip install dist/*.whl pytest -r benchmarks/requirements.txt
       - name: pytest
-        run: pytest -q -rs
+        shell: bash
+        run: pytest -q -rs --junitxml=junit.xml
+      - name: Report failing tests as annotations
+        if: failure()
+        shell: bash
+        run: |
+          python - <<'EOF'
+          import xml.etree.ElementTree as ET
+          try:
+              root = ET.parse("junit.xml").getroot()
+          except Exception as e:
+              print(f"::error title=pytest::no junit.xml ({e})"); raise SystemExit
+          for case in root.iter("testcase"):
+              for bad in list(case.iter("failure")) + list(case.iter("error")):
+                  name = f"{case.get('classname')}::{case.get('name')}"
+                  text = ((bad.get("message") or "") + "\n" + (bad.text or "")).strip()
+                  text = text[-1500:].replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+                  print(f"::error title={name}::{text}")
+          EOF
 
   wheels:
     if: startsWith(github.ref, 'refs/tags/v')
