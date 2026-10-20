@@ -7,6 +7,9 @@ Grammar (keywords are case-insensitive; ``[...]`` is optional)::
 
     CALIBRATION OF <effect> [BINS <n>]
 
+    RISK OF <effect> FOR <entity> FEATURES <f>[,<f>...] [WEIGHT <w>] [TYPE <t>]
+        [ATTRS k=v[,k=v...]] [EXPLAIN]
+
     FEEDBACK <effect> FOR <entity> AT <time> CONFIRMED <event_id>
              [REJECTED <id>[,<id>...]]
 
@@ -19,6 +22,11 @@ reports mean predicted score vs observed confirm rate per bin and the Brier
 score. ``INSERT`` also accepts ``ATTRS k=v[,k=v...]`` (numeric values are
 parsed as numbers); without ``WEIGHT`` the event type's registered weight
 function, if any, derives the weight from the attributes.
+
+``RISK OF`` scores a candidate that has *not happened yet* (e.g. an open pull
+request) with :meth:`~heapdb.store.HeapDB.feature_risk`: dose x noisy-OR of
+the entity's current links x rules, with no timing term. Without ``WEIGHT``
+the dose is derived from ``ATTRS`` by the type's weight function (else 1.0).
 
 ``<time>`` is a number of seconds, ``now``, ``now-<duration>``, or an ISO-8601
 datetime (``2024-05-01T13:30``). ``<duration>`` is a number with an optional
@@ -39,7 +47,7 @@ from datetime import datetime
 from typing import Callable, Union
 
 from .events import format_time
-from .store import CalibrationReport, HeapDB, QueryResult
+from .store import CalibrationReport, HeapDB, QueryResult, RiskResult
 
 _UNITS = {"s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
 _DURATION_RE = re.compile(r"^(\d+(?:\.\d+)?)([smhd]?)$", re.IGNORECASE)
@@ -91,6 +99,17 @@ class CalibrationQuery:
 
 
 @dataclass(frozen=True)
+class RiskQuery:
+    effect: str
+    entity: str
+    features: frozenset[str]
+    weight: float | None = None  # None: derived from attrs, else 1.0
+    type: str | None = None
+    attrs: tuple[tuple[str, object], ...] = ()
+    explain: bool = False
+
+
+@dataclass(frozen=True)
 class FeedbackStmt:
     effect: str
     entity: str
@@ -109,7 +128,7 @@ class InsertStmt:
     attrs: tuple[tuple[str, object], ...] = ()
 
 
-Statement = Union[TopCausesQuery, FeedbackStmt, InsertStmt, CalibrationQuery]
+Statement = Union[TopCausesQuery, FeedbackStmt, InsertStmt, CalibrationQuery, RiskQuery]
 
 
 # ---------------------------------------------------------------------------
@@ -203,9 +222,11 @@ def parse(text: str) -> Statement:
         stmt = _parse_insert(ts)
     elif head == "CALIBRATION":
         stmt = _parse_calibration(ts)
+    elif head == "RISK":
+        stmt = _parse_risk(ts)
     else:
         raise QueryError(f"unknown statement {head!r} "
-                         f"(expected TOP, FEEDBACK, INSERT or CALIBRATION)")
+                         f"(expected TOP, RISK, FEEDBACK, INSERT or CALIBRATION)")
     if not ts.done():
         raise QueryError(f"unexpected trailing input: {' '.join(ts.toks[ts.i:])!r}")
     return stmt
@@ -274,6 +295,42 @@ def _parse_attrs(tok: str) -> tuple[tuple[str, object], ...]:
     return tuple(out)
 
 
+def _weight(tok: str) -> float:
+    try:
+        return float(tok)
+    except ValueError:
+        raise QueryError("WEIGHT must be a number") from None
+
+
+def _parse_risk(ts: _Tokens) -> RiskQuery:
+    ts.expect("OF")
+    effect = ts.next("effect name")
+    ts.expect("FOR")
+    entity = ts.next("entity")
+    feats: frozenset[str] | None = None
+    weight: float | None = None
+    type_: str | None = None
+    attrs: tuple[tuple[str, object], ...] = ()
+    explain = False
+    while not ts.done():
+        kw = ts.next("clause").upper()
+        if kw == "FEATURES":
+            feats = frozenset(f for f in ts.next("features").split(",") if f)
+        elif kw == "WEIGHT":
+            weight = _weight(ts.next("weight"))
+        elif kw == "TYPE":
+            type_ = ts.next("event type")
+        elif kw == "ATTRS":
+            attrs = _parse_attrs(ts.next("attributes"))
+        elif kw == "EXPLAIN":
+            explain = True
+        else:
+            raise QueryError(f"unexpected {kw!r} (expected FEATURES, WEIGHT, TYPE, ATTRS or EXPLAIN)")
+    if not feats:
+        raise QueryError("RISK needs FEATURES <f>[,<f>...]")
+    return RiskQuery(effect, entity, feats, weight, type_, attrs, explain)
+
+
 def _parse_feedback(ts: _Tokens) -> FeedbackStmt:
     effect = ts.next("effect name")
     ts.expect("FOR")
@@ -303,10 +360,7 @@ def _parse_insert(ts: _Tokens) -> InsertStmt:
         elif kw == "FEATURES":
             feats = frozenset(f for f in ts.next("features").split(",") if f)
         elif kw == "WEIGHT":
-            try:
-                weight = float(ts.next("weight"))
-            except ValueError:
-                raise QueryError("WEIGHT must be a number") from None
+            weight = _weight(ts.next("weight"))
         elif kw == "ATTRS":
             attrs = _parse_attrs(ts.next("attributes"))
         else:
@@ -323,9 +377,9 @@ def execute(
     db: HeapDB,
     stmt: Statement | str,
     clock: Callable[[], float] = _time.time,
-) -> QueryResult | CalibrationReport | str:
-    """Run a statement. Queries return a QueryResult (or CalibrationReport);
-    writes return a message."""
+) -> QueryResult | CalibrationReport | RiskResult | str:
+    """Run a statement. Queries return a QueryResult (or CalibrationReport,
+    RiskResult); writes return a message."""
     if isinstance(stmt, str):
         stmt = parse(stmt)
     now = clock()
@@ -337,6 +391,12 @@ def execute(
                              k=stmt.k, explain=stmt.explain, within=stmt.within)
     if isinstance(stmt, CalibrationQuery):
         return db.calibration_report(stmt.effect, bins=stmt.bins)
+    if isinstance(stmt, RiskQuery):
+        out = db.feature_risk(stmt.effect, stmt.features, weight=stmt.weight,
+                              entity=stmt.entity, type=stmt.type, attrs=dict(stmt.attrs),
+                              explain=stmt.explain)
+        score, ex = out if isinstance(out, tuple) else (out, None)
+        return RiskResult(stmt.effect, stmt.entity, stmt.features, stmt.type, score, ex)
     if isinstance(stmt, FeedbackStmt):
         db.feedback(stmt.entity, stmt.effect, stmt.at.resolve(now),
                     confirmed_event_id=stmt.confirmed, rejected_ids=stmt.rejected)
@@ -350,9 +410,9 @@ def execute(
     raise QueryError(f"cannot execute {stmt!r}")  # pragma: no cover
 
 
-def format_result(res: QueryResult | CalibrationReport) -> str:
-    """Pretty-print a QueryResult or CalibrationReport (CLI and examples)."""
-    if isinstance(res, CalibrationReport):
+def format_result(res: QueryResult | CalibrationReport | RiskResult) -> str:
+    """Pretty-print a QueryResult, CalibrationReport or RiskResult."""
+    if isinstance(res, (CalibrationReport, RiskResult)):
         return str(res)
     who = f"entities {res.entity}" if res.is_group else res.entity
     lines = [f"Top causes of '{res.effect}' for {who} at t={format_time(res.at)}:"]

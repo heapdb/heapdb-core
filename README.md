@@ -35,6 +35,7 @@ Plenty of questions have the same shape:
 | p99 latency spiked         | deploys, config changes, flag flips     |
 | a user churned             | support tickets, outages, price changes |
 | a sensor alarmed           | maintenance actions, weather events     |
+| an incident / broken main  | merged PRs and deploys (AI-authored or not) |
 
 They all come down to ranking recent events by:
 
@@ -57,6 +58,43 @@ reasons, and you want the database to learn when you tell it which one was
 right. HeapDB is built around exactly that query, and that is where the name
 comes from: conceptually it is a priority queue of suspects that you pop from.
 
+## Use case: AI-heavy code changes
+
+When a large share of merged code is written by agents, more changes land
+per day, and they get reviewed faster. HeapDB covers both halves of keeping
+that safe:
+
+1. **Attribution** (after the fact). An error spike, a failing main check or
+   an incident fires: `top_causes(service, "incident", at, k=3, explain=True)`
+   ranks the recently merged PRs by timing x dose (`log1p(lines_changed)`) x
+   learned links of their features (`migration`, `lockfile`, `review:fast`,
+   `path:payments/retry`, ...) x rules (`docs_only` x0). A revert is
+   feedback: the culprit is confirmed and the cleared suspects are rejected.
+2. **Priority** (before the fact). The same learned links score PRs that
+   **have not merged yet**: `feature_risk(effect, features, ...)` and
+   `rank_candidates(effect, open_prs, k)` give a pre-merge review queue,
+   i.e. which open PRs deserve a careful human review. There is no kernel
+   term, because nothing has happened yet.
+
+```python
+from heapdb import Candidate
+queue = db.rank_candidates("incident", [
+    Candidate("PR-1201", {"path:payments/retry", "lockfile", "dep_bump", "ai_authored"},
+              type="deploy", attrs={"lines_changed": 60}, entity="payments"),
+    Candidate("PR-1203", {"docs_only"}, type="deploy", attrs={"lines_changed": 40},
+              entity="search"),          # dropped: the docs_only rule scores it 0
+], k=10, explain=True)
+for row in queue:
+    print(row.rank, row.candidate.id, round(row.score, 3), row.explanation)
+```
+
+`examples/code_changes.py` simulates a week of this across three services,
+with a hidden ground truth: dangerous feature combinations, plus an
+`ai_authored` feature that only correlates with risky traits. It prints
+attribution accuracy (first vs second half of the week), learned links,
+proportional vs uniform credit for the confounder, calibration, and the
+pre-merge queue next to the hidden true risk.
+
 ## Quickstart
 
 Requires Python 3.10+. No runtime dependencies.
@@ -66,6 +104,7 @@ pip install -e ".[test]"     # or just put this directory on PYTHONPATH
 pytest
 python examples/bloating.py
 python examples/incident_rca.py
+python examples/code_changes.py
 python -m heapdb --demo      # REPL
 ```
 
@@ -97,6 +136,9 @@ print(rep.credit)           # {'beans': 0.9375, 'onion': 0.25}
 
 print(db.calibration_report("bloating"))
 
+# Pre-event risk of something that has not happened yet (no timing term).
+print(db.feature_risk("bloating", {"beans", "rice"}, weight=1.0, entity="me"))
+
 db.save("me.jsonl")
 db2 = HeapDB.load("me.jsonl")
 ```
@@ -108,11 +150,14 @@ TOP <k> CAUSES OF <effect> FOR <entity>[,<entity>...] [AT <time>] [WITHIN <durat
 FEEDBACK <effect> FOR <entity> AT <time> CONFIRMED <id> [REJECTED <id>,<id>...]
 INSERT <type> FOR <entity> [AT <time>] [FEATURES <f>,<f>...] [WEIGHT <dose>] [ATTRS k=v,...]
 CALIBRATION OF <effect> [BINS <n>]
+RISK OF <effect> FOR <entity> FEATURES <f>,<f>... [WEIGHT <w>] [TYPE <t>] [ATTRS k=v,...] [EXPLAIN]
 ```
 
 `FOR a,b,c` with several entities runs a group query. `<time>` can be
 seconds, `now`, `now-2h` or ISO-8601. `<duration>` can be `90`, `30m`,
-`12h` or `2d`. The REPL (`python -m heapdb`) also has meta commands:
+`12h` or `2d`. `RISK OF` scores a candidate that has not happened yet (see
+`feature_risk` below). Without `WEIGHT`, the dose comes from `ATTRS` via the
+type's weight function, else 1.0. The REPL (`python -m heapdb`) also has meta commands:
 `.effect`, `.prior`, `.rules`, `.forget`, `.events`, `.save`, `.load` and
 `.help`. Rules and weight functions are Python callables, so you register
 them through the API, not the query language.
@@ -126,7 +171,8 @@ heapdb/
   links.py          Hierarchical Beta links (prior / global / entity), EM credit, joint links
   segments.py       Per-entity, time-bucketed segments with summaries + inverted index
   store.py          HeapDB: insert, top-k + group queries with pruning, rules, explain,
-                    feedback, calibration, forget_entity, snapshots
+                    feature_risk / rank_candidates, feedback, calibration,
+                    forget_entity, snapshots
   forward_decay.py  ForwardDecayHeap: time-invariant ordering for exponential decay
   query.py          Query-language parser + executor
   cli.py            `python -m heapdb` REPL
@@ -293,6 +339,42 @@ bounds stay valid. Every applied rule appears in the explanation
 hard filter. As a temporal sanity check, every kernel returns 0 for negative
 lag, and `score()` also returns 0 for any event after the effect.
 
+### Pre-event risk: `feature_risk` and `rank_candidates`
+
+```python
+db.feature_risk(effect, features, weight=1.0, entity=None, type=None, attrs=None,
+                explain=False)                   # -> score, or (score, Explanation)
+db.rank_candidates(effect, candidates, k=10, entity=None, explain=False)
+                                                 # -> [RankedCandidate], best first
+```
+
+```
+risk = weight × noisy_OR_f( strength_entity(f, effect) ) × Π rules
+```
+
+This is `score` without the kernel. For any stored event `e`,
+`score(e, effect, at) == kernel(at − e.time) × feature_risk(effect, e.features,
+e.weight, e.entity, e.type, e.attrs)`; a property test checks this across all
+kernels. The details:
+
+- **Links.** Links are entity-aware and use the same hierarchical layers as
+  queries. `entity=None` uses the global (population) view.
+- **Rules.** Rules are evaluated against a transient, unstored `Event`
+  (`id=0`, `time=nan`) built from `type`/`features`/`attrs`. Predicates that
+  look at `time` will not match.
+- **Type.** If `type` is given, `cause_types` applies (a disallowed type
+  scores 0 and the explanation says why), and type-scoped rules can match.
+  `weight=None` derives the dose from `attrs` via the type's weight function.
+- **Explanation.** `explain=True` returns the same `Explanation` structure
+  with `prospective=True` and `kernel_value=1`: per-feature links, applied
+  rules, and joint causes / inseparable warnings from the entity's history.
+- **Ranking.** `rank_candidates` takes `Candidate` objects or dicts (`id`,
+  `features`, `weight`, `type`, `attrs`, `entity`). A candidate's own
+  `entity` overrides the argument, so one call can rank PRs across services,
+  with the same calibration caveat as group queries. It keeps a bounded
+  min-heap of size *k* in one pass, drops zero scores, keeps the earlier
+  candidate on ties, and builds explanations only for the returned rows.
+
 ### Calibration tracking
 
 Each `feedback()` call records, for every judged event, the score it had
@@ -361,6 +443,30 @@ Design direction (**not implemented** beyond `forget_entity`):
   entity's contribution), so the population prior cannot be used to infer
   any one entity's history.
 
+## Changelog: v0.3
+
+- **Pre-event risk.** `feature_risk(effect, features, weight=1.0, entity=None,
+  type=None, attrs=None, explain=False)` scores a candidate that is not (yet)
+  an event: dose × noisy-OR of the current entity-aware links × rules, with
+  no kernel term. This is the "priority" half of attribution, e.g. ranking
+  open PRs before merge. `rank_candidates(effect, candidates, k, entity=None,
+  explain=False)` returns the heap-based top-k as `RankedCandidate`s. The new
+  types are `Candidate`, `RankedCandidate` and `RiskResult`.
+- **Explanation.** `Explanation` gained `prospective` (True for risk
+  explanations, which print `no lag (pre-event)` instead of the lag/kernel
+  part).
+- **Query language.** `RISK OF <effect> FOR <entity> FEATURES a,b [WEIGHT w]
+  [TYPE t] [ATTRS k=v,...] [EXPLAIN]`, also listed in the REPL `.help`.
+- **New example.** `examples/code_changes.py` covers AI-heavy code changes:
+  a seeded week of ~150 PRs on three services, three effects with
+  different kernels, revert feedback, hit@1/hit@3 learning curves,
+  proportional vs uniform credit on an `ai_authored` confounder, calibration,
+  a group query and a pre-merge review queue.
+- **Tests.** Monotonicity in link strength and dose, rules reducing risk,
+  equality with `score / kernel` for inserted events (property test across
+  kernels), top-k equal to a full sort, and query-language parsing and
+  execution.
+
 ## Changelog: v0.2
 
 - **Proportional credit.** Confirmations use the noisy-OR EM update
@@ -415,6 +521,9 @@ Ideas, not promises:
 - [ ] Better confounding handling: partial co-occurrence, lift, suggested
       "elimination experiments" (v0.2 has exact co-occurrence + joint links)
 - [ ] Negative / protective links, and effect-specific cause type hierarchies
+- [ ] Interaction features learned automatically (today a harmful combination such
+      as `migration+review:fast` is learned only through its members unless you
+      add a cross feature yourself)
 - [ ] Incremental "standing queries" built on forward decay for exponential kernels
 - [ ] Durable storage: write-ahead log, compaction, segment files
 - [ ] A Rust/Go core with this implementation kept as the executable spec

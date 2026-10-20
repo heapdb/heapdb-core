@@ -6,6 +6,7 @@ Both scripts are self-contained (stdlib only) and put the repository root on
 ```bash
 python examples/bloating.py
 python examples/incident_rca.py
+python examples/code_changes.py
 ```
 
 ## `bloating.py`: personal health, learning from feedback
@@ -46,3 +47,37 @@ A week of changes to `checkout`, then a p99 latency spike. It shows:
   global layer, so a brand-new service inherits the lesson.
 - **ForwardDecayHeap.** A live "hottest change" ticker that agrees with
   `top_causes` at every instant without re-scoring.
+
+## `code_changes.py`: AI-heavy code changes, from attribution to pre-merge risk
+
+A seeded week of ~150 merged PRs across `checkout`, `payments` and `search`,
+with features like `path:payments/retry`, `migration`, `lockfile`,
+`dep_bump`, `config`, `flag_flip`, `size:large`, `review:fast`,
+`review:none`, `ai_authored`, `tests:none` and `docs_only`. Hidden ground
+truth makes some combinations dangerous (migration + fast review, lockfile
+changes in payments, config without tests). `ai_authored` has no causal
+effect but correlates with large, fast-reviewed PRs. Runs in well under a
+second. It shows:
+
+- **Three effects, three kernels.** `failing_main_check` (exponential,
+  10 min half-life), `error_spike` (log-normal, median 30 min) and
+  `incident` (log-normal, median 3 h). `cause_types=["deploy"]` excludes
+  on-call handoffs, and a `docs_only` rule (x0) is a hard block. Services are
+  separate entities, so a deploy to `search` is never blamed for a
+  `payments` incident.
+- **Reverts as feedback.** The true culprit is confirmed and the other top-3
+  suspects are rejected. hit@1 / hit@3 are printed per effect for the first
+  and second half of the week, plus a no-feedback baseline and a 20-seed
+  average. One week is small, so expect a modest gain (about +0.07 hit@1 on
+  average), not a dramatic one.
+- **Proportional vs uniform credit.** The same week replayed with
+  `credit="uniform"`: the confounder `ai_authored` ends up with an incident
+  link about 3x higher than under proportional credit.
+- **Calibration** for `incident` and `error_spike`, and a cross-service
+  **group query**.
+- **Pre-merge review queue.** `rank_candidates("incident", open_prs, k=10)`
+  ranks 10 open PRs by `feature_risk` (dose x noisy-OR of the current links
+  x rules, with no timing term), with explanations, next to the hidden true
+  risk. The same query is also run as `RISK OF incident FOR payments FEATURES ...`.
+  Links are per-feature, so interactions are learned only through their
+  members. The script points out where that misleads the queue.

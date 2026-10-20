@@ -196,6 +196,9 @@ class Explanation:
     rules: tuple[AppliedRule, ...] = ()
     joint_causes: tuple[JointCause, ...] = ()
     entity: str = ""
+    #: True for :meth:`HeapDB.feature_risk` explanations: the candidate has
+    #: not happened yet, so there is no lag and ``kernel_value`` is 1.
+    prospective: bool = False
 
     @property
     def rule_multiplier(self) -> float:
@@ -214,12 +217,14 @@ class Explanation:
         return any(j.inseparable for j in self.joint_causes)
 
     def __str__(self) -> str:
-        hours = self.dt / 3600.0
         joint = {f for j in self.joint_causes if j.inseparable for f in j.features}
         parts = [str(j) for j in self.joint_causes if j.inseparable]
         parts += [str(c) for c in self.features if c.feature not in joint]
-        out = (f"lag {hours:.2f}h -> kernel {self.kernel_value:.3f} "
-               f"x weight {self.weight:.3g} x link {self.link_strength:.3f}")
+        if self.prospective:
+            out = f"no lag (pre-event) -> weight {self.weight:.3g} x link {self.link_strength:.3f}"
+        else:
+            out = (f"lag {self.dt / 3600.0:.2f}h -> kernel {self.kernel_value:.3f} "
+                   f"x weight {self.weight:.3g} x link {self.link_strength:.3f}")
         if self.rules:
             out += " x rules " + ", ".join(str(r) for r in self.rules)
         out += f" [noisy-OR of {', '.join(parts) or '-'}]"
@@ -300,6 +305,73 @@ class QueryResult:
     @property
     def is_group(self) -> bool:
         return len(self.entities) > 1
+
+
+@dataclass(frozen=True)
+class Candidate:
+    """Something that has *not* happened yet and could cause an effect.
+
+    E.g. an open pull request: ``Candidate("PR-812", {"migration",
+    "review:fast"}, type="deploy", attrs={"lines_changed": 340},
+    entity="payments")``. ``weight=None`` derives the dose from ``attrs``
+    with the type's registered weight function (else 1.0). ``entity=None``
+    uses the ``entity`` passed to :meth:`HeapDB.rank_candidates`.
+    """
+
+    id: Any
+    features: frozenset[str] = field(default_factory=frozenset)
+    weight: float | None = None
+    type: str | None = None
+    attrs: Mapping[str, Any] | None = field(default=None, hash=False, compare=False)
+    entity: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "features", as_feature_set(self.features))
+
+    @classmethod
+    def from_any(cls, c: "Candidate | Mapping[str, Any]", index: int) -> "Candidate":
+        if isinstance(c, Candidate):
+            return c
+        if isinstance(c, Mapping):
+            unknown = set(c) - {"id", "features", "weight", "type", "attrs", "entity"}
+            if unknown:
+                raise ValueError(f"unknown candidate keys {sorted(unknown)}")
+            return cls(id=c.get("id", index), features=c.get("features") or frozenset(),
+                       weight=c.get("weight"), type=c.get("type"), attrs=c.get("attrs"),
+                       entity=c.get("entity"))
+        raise TypeError(f"candidate must be a Candidate or a dict, got {type(c).__name__}")
+
+
+@dataclass(frozen=True)
+class RankedCandidate:
+    """One row of :meth:`HeapDB.rank_candidates` (best first)."""
+
+    rank: int
+    candidate: Candidate
+    score: float
+    entity: str | None
+    explanation: Explanation | None = None
+
+
+@dataclass(frozen=True)
+class RiskResult:
+    """Result of a ``RISK OF ...`` statement (see :meth:`HeapDB.feature_risk`)."""
+
+    effect: str
+    entity: str | None
+    features: frozenset[str]
+    type: str | None
+    score: float
+    explanation: Explanation | None = None
+
+    def __str__(self) -> str:
+        who = self.entity if self.entity is not None else "(global)"
+        typ = f" type={self.type}" if self.type else ""
+        out = (f"Risk of '{self.effect}' for {who}{typ} "
+               f"[{','.join(sorted(self.features))}]: {self.score:.4f}")
+        if self.explanation is not None:
+            out += f"\n      {self.explanation}"
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -841,6 +913,158 @@ class HeapDB:
     def most_likely_cause(self, entity: str, effect: str, at: float) -> Cause | None:
         """Pop the top: the single most likely cause right now."""
         return self.top_causes(entity, effect, at, k=1, explain=True).top
+
+    # -- prospective risk: candidates that have not happened yet ------------
+
+    def _transient_event(self, entity: str | None, type: str | None,
+                         features: Iterable[str] | str | None, weight: float | None,
+                         attrs: Mapping[str, Any] | None) -> Event:
+        """An Event that is *not* stored (id 0, time NaN), used to evaluate
+        rules and co-occurrence for a candidate."""
+        attrs = dict(attrs or {})
+        if weight is None:
+            fn = self._event_types.get(type) if type is not None else None
+            weight = fn(attrs) if fn is not None else 1.0
+        return Event(id=0, entity=entity if entity is not None else "", time=math.nan,
+                     type=type if type is not None else "",
+                     features=as_feature_set(features), weight=validate_weight(weight),
+                     attrs=attrs)
+
+    def _risk(self, spec: EffectSpec, ev: Event, entity: str | None, type_given: bool) -> float:
+        if type_given and not spec.type_allowed(ev.type):
+            return 0.0
+        s = ev.weight * spec.links.noisy_or(ev.features, entity)
+        for r in spec.rules:
+            if s == 0.0:
+                break
+            if r.matches(ev):
+                s *= r.multiplier
+        return s
+
+    def _risk_explanation(self, spec: EffectSpec, ev: Event, entity: str | None,
+                          type_given: bool) -> Explanation:
+        contribs = []
+        for f in ev.features:
+            c = spec.links.get(f, entity)
+            contribs.append(FeatureContribution(f, c.strength, c.alpha, c.beta))
+        contribs.sort(key=lambda c: (-c.strength, c.feature))
+        rules = [AppliedRule(r.name, r.multiplier) for r in self._applied_rules(spec, ev)]
+        warnings: list[str] = []
+        joint: list[JointCause] = []
+        if type_given and not spec.type_allowed(ev.type):
+            rules.insert(0, AppliedRule(f"type {ev.type!r} not in cause_types", 0.0))
+        if entity is not None:
+            # Historical co-occurrence of the candidate's features for this
+            # entity (the candidate itself is not in the log).
+            groups = [(fs, n) for fs, n in self._inseparable_groups(ev) if n > 0]
+            warnings = self._confounding_warnings(ev, spec, groups)
+            joint = self._joint_causes(ev, spec, groups)
+        return Explanation(
+            dt=0.0, kernel_value=1.0, weight=ev.weight,
+            link_strength=spec.links.noisy_or(ev.features, entity),
+            features=tuple(contribs), warnings=tuple(warnings), rules=tuple(rules),
+            joint_causes=tuple(joint), entity=ev.entity, prospective=True,
+        )
+
+    def feature_risk(
+        self,
+        effect: str,
+        features: Iterable[str] | str,
+        weight: float | None = 1.0,
+        entity: str | None = None,
+        type: str | None = None,
+        attrs: Mapping[str, Any] | None = None,
+        explain: bool = False,
+    ) -> float | tuple[float, Explanation]:
+        """Risk that a candidate which has **not happened yet** causes ``effect``.
+
+        This is the *priority* half of attribution: ``top_causes`` asks
+        "which past event caused this?", ``feature_risk`` asks "if this
+        happens (merges, ships, is eaten), how likely is it to cause that?".
+        Typical use: rank open pull requests by the risk of an incident
+        *before* they merge, from the links learned from earlier
+        confirmations (reverts) and rejections::
+
+            risk = weight * noisy_OR_f( strength_entity(f, effect) ) * rules(event)
+
+        It is ``score`` without the kernel term (there is no lag yet), so for
+        a stored event ``e``: ``score(e, effect, at) ==
+        kernel(at - e.time) * feature_risk(effect, e.features, e.weight,
+        e.entity, e.type, e.attrs)`` (for rules that do not look at time).
+
+        Args:
+            features: The candidate's features (set or comma-separated string).
+            weight: Dose (> 0). ``None`` derives it from ``attrs`` with the
+                type's registered weight function (else 1.0).
+            entity: Whose links to use (entity layer + shrunk global evidence
+                + registered priors). ``None`` uses the global (population) view.
+            type: Event type. If given, ``cause_types`` applies (a disallowed
+                type scores 0) and type-scoped rules can match. If omitted,
+                the type filter is skipped and only untyped rules can match.
+            attrs: Attributes visible to rule predicates (and the weight fn).
+            explain: Also return an :class:`Explanation` (``prospective=True``,
+                ``kernel_value == 1``) with per-feature links, applied rules and
+                joint causes from the entity's history.
+
+        Rules are evaluated against a transient, unstored event (``id=0``,
+        ``time=nan``): predicates that look at ``time`` will not match.
+
+        Returns:
+            The risk score, or ``(score, explanation)`` if ``explain``.
+        """
+        spec = self.effect(effect)
+        ev = self._transient_event(entity, type, features, weight, attrs)
+        s = self._risk(spec, ev, entity, type is not None)
+        if explain:
+            return s, self._risk_explanation(spec, ev, entity, type is not None)
+        return s
+
+    def rank_candidates(
+        self,
+        effect: str,
+        candidates: Iterable[Candidate | Mapping[str, Any]],
+        k: int = 10,
+        entity: str | None = None,
+        explain: bool = False,
+    ) -> list[RankedCandidate]:
+        """Top-``k`` not-yet-happened candidates by :meth:`feature_risk`.
+
+        ``candidates`` are :class:`Candidate` objects or dicts with the same
+        keys (``id``, ``features``, ``weight``, ``type``, ``attrs``,
+        ``entity``). A candidate's own ``entity`` overrides the ``entity``
+        argument, so one call can rank PRs across several services (with the
+        same calibration caveat as :meth:`top_causes_group`). Candidates
+        scoring 0 (hard-blocked by a rule or type filter) are dropped, as in
+        ``top_causes``. Uses a bounded min-heap of size ``k`` over a single
+        pass; ties keep the earlier candidate. Explanations are built only for
+        the returned rows.
+        """
+        if k <= 0:
+            raise ValueError("k must be >= 1")
+        spec = self.effect(effect)
+        # Min-heap of (score, -index, ...): the root is the current k-th best;
+        # on ties the earlier candidate (smaller index) ranks higher.
+        heap: list[tuple[float, int, Candidate, str | None, Event]] = []
+        for i, raw in enumerate(candidates):
+            c = Candidate.from_any(raw, i)
+            ent = c.entity if c.entity is not None else entity
+            ev = self._transient_event(ent, c.type, c.features, c.weight, c.attrs)
+            s = self._risk(spec, ev, ent, c.type is not None)
+            if s <= 0.0:
+                continue
+            item = (s, -i, c, ent, ev)
+            if len(heap) < k:
+                heapq.heappush(heap, item)
+            elif item[:2] > heap[0][:2]:
+                heapq.heapreplace(heap, item)
+        ranked = sorted(heap, key=lambda it: (-it[0], -it[1]))
+        return [
+            RankedCandidate(
+                rank=r + 1, candidate=c, score=s, entity=ent,
+                explanation=(self._risk_explanation(spec, ev, ent, c.type is not None)
+                             if explain else None))
+            for r, (s, _, c, ent, ev) in enumerate(ranked)
+        ]
 
     # -- feedback -----------------------------------------------------------
 

@@ -23,6 +23,7 @@ from .store import (
     CalibrationBin,
     CalibrationRecord,
     CalibrationReport,
+    Candidate,
     Cause,
     EffectSpec,
     Explanation,
@@ -32,10 +33,12 @@ from .store import (
     JointCause,
     QueryResult,
     QueryStats,
+    RankedCandidate,
+    RiskResult,
     Rule,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "AppliedRule",
@@ -43,6 +46,7 @@ __all__ = [
     "CalibrationBin",
     "CalibrationRecord",
     "CalibrationReport",
+    "Candidate",
     "Cause",
     "EffectSpec",
     "EntityLog",
@@ -61,6 +65,8 @@ __all__ = [
     "QueryError",
     "QueryResult",
     "QueryStats",
+    "RankedCandidate",
+    "RiskResult",
     "Rule",
     "Segment",
     "WindowKernel",

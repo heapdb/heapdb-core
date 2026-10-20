@@ -22,6 +22,7 @@ pip install -e ".[test]"
 pytest
 python examples/bloating.py
 python examples/incident_rca.py
+python examples/code_changes.py
 ```
 
 ## Good first contributions
