@@ -86,6 +86,39 @@ class Kernel:
         # the endpoint closest to the mode.
         return max(self.value(lo), self.value(hi))
 
+    #: Grid size of the numeric cumulative-mass table (see ``mass_fraction``).
+    _MASS_GRID = 2048
+
+    def mass_fraction(self, dt: float) -> float:
+        """Fraction of the kernel's total mass (area) at lags ``<= dt``.
+
+        0 below ``min_lag``, 1 at or beyond ``support``. Computed once per
+        kernel by trapezoidal integration on a uniform grid and then linearly
+        interpolated; used by :meth:`HeapDB.settle` (``partial=True``) to
+        scale negative evidence by how much of an event's window has elapsed.
+        """
+        lo, hi = max(self.min_lag, 0.0), self.support
+        if dt <= lo:
+            return 0.0
+        if dt >= hi:
+            return 1.0
+        table = getattr(self, "_mass_table", None)
+        if table is None:
+            n = self._MASS_GRID
+            step = (hi - lo) / n
+            vals = [self.value(lo + i * step) for i in range(n + 1)]
+            cum = [0.0]
+            for i in range(n):
+                cum.append(cum[-1] + 0.5 * (vals[i] + vals[i + 1]) * step)
+            total = cum[-1] or 1.0
+            table = (lo, step, [c / total for c in cum])
+            self._mass_table = table
+        lo, step, cum = table
+        x = (dt - lo) / step
+        i = min(int(x), len(cum) - 2)
+        frac = x - i
+        return cum[i] + frac * (cum[i + 1] - cum[i])
+
     def __repr__(self) -> str:
         args = ", ".join(f"{k}={v!r}" for k, v in self.to_dict().items() if k != "kind")
         return f"{type(self).__name__}({args})"

@@ -15,6 +15,21 @@ Grammar (keywords are case-insensitive; ``[...]`` is optional)::
 
     INSERT <type> FOR <entity> [AT <time>] [FEATURES <f>[,<f>...]] [WEIGHT <w>]
 
+    OBSERVE <effect> FOR <entity> [AT <time>] [LEAK <x>]
+
+    SETTLE [<effect>] UNTIL <time> [FOR <entity>]
+
+    LINKS OF <effect> [FOR <entity>] [MIN <n>]
+
+``OBSERVE`` records an occurrence of an effect with no labelled cause and
+learns from it observationally (soft EM credit, see
+:meth:`~heapdb.store.HeapDB.observe`). ``SETTLE`` adds negative evidence for
+events whose kernel window passed without the effect
+(:meth:`~heapdb.store.HeapDB.settle`). ``LINKS OF`` lists learned link
+strengths with 90% credible intervals and lift
+(:meth:`~heapdb.store.HeapDB.link_report`) -- associations under the model,
+not causal effects.
+
 ``FOR a,b,c`` (several entities) runs a cross-entity group query
 (:meth:`~heapdb.store.HeapDB.top_causes_group`); scores are only comparable
 across entities once calibrated (see ``CALIBRATION OF``). ``CALIBRATION OF``
@@ -47,7 +62,15 @@ from datetime import datetime
 from typing import Callable, Union
 
 from .events import format_time
-from .store import CalibrationReport, HeapDB, QueryResult, RiskResult
+from .store import (
+    CalibrationReport,
+    HeapDB,
+    LinkReport,
+    ObserveReport,
+    QueryResult,
+    RiskResult,
+    SettleReport,
+)
 
 _UNITS = {"s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
 _DURATION_RE = re.compile(r"^(\d+(?:\.\d+)?)([smhd]?)$", re.IGNORECASE)
@@ -128,7 +151,30 @@ class InsertStmt:
     attrs: tuple[tuple[str, object], ...] = ()
 
 
-Statement = Union[TopCausesQuery, FeedbackStmt, InsertStmt, CalibrationQuery, RiskQuery]
+@dataclass(frozen=True)
+class ObserveStmt:
+    effect: str
+    entity: str
+    at: TimeExpr = NOW
+    leak: float | None = None
+
+
+@dataclass(frozen=True)
+class SettleStmt:
+    until: TimeExpr
+    effect: str | None = None
+    entity: str | None = None
+
+
+@dataclass(frozen=True)
+class LinksQuery:
+    effect: str
+    entity: str | None = None
+    min_support: float = 1.0
+
+
+Statement = Union[TopCausesQuery, FeedbackStmt, InsertStmt, CalibrationQuery, RiskQuery,
+                  ObserveStmt, SettleStmt, LinksQuery]
 
 
 # ---------------------------------------------------------------------------
@@ -224,9 +270,15 @@ def parse(text: str) -> Statement:
         stmt = _parse_calibration(ts)
     elif head == "RISK":
         stmt = _parse_risk(ts)
+    elif head == "OBSERVE":
+        stmt = _parse_observe(ts)
+    elif head == "SETTLE":
+        stmt = _parse_settle(ts)
+    elif head == "LINKS":
+        stmt = _parse_links(ts)
     else:
-        raise QueryError(f"unknown statement {head!r} "
-                         f"(expected TOP, RISK, FEEDBACK, INSERT or CALIBRATION)")
+        raise QueryError(f"unknown statement {head!r} (expected TOP, RISK, FEEDBACK, "
+                         f"INSERT, CALIBRATION, OBSERVE, SETTLE or LINKS)")
     if not ts.done():
         raise QueryError(f"unexpected trailing input: {' '.join(ts.toks[ts.i:])!r}")
     return stmt
@@ -368,6 +420,63 @@ def _parse_insert(ts: _Tokens) -> InsertStmt:
     return InsertStmt(type_, entity, at, feats, weight, attrs)
 
 
+def _number(tok: str, what: str) -> float:
+    try:
+        return float(tok)
+    except ValueError:
+        raise QueryError(f"{what} must be a number, got {tok!r}") from None
+
+
+def _parse_observe(ts: _Tokens) -> ObserveStmt:
+    effect = ts.next("effect name")
+    ts.expect("FOR")
+    entity = ts.next("entity")
+    at: TimeExpr = NOW
+    leak: float | None = None
+    while not ts.done():
+        kw = ts.next("clause").upper()
+        if kw == "AT":
+            at = parse_time(ts.next("time"))
+        elif kw == "LEAK":
+            leak = _number(ts.next("leak"), "LEAK")
+            if not leak > 0:
+                raise QueryError("LEAK must be > 0")
+        else:
+            raise QueryError(f"unexpected {kw!r} (expected AT or LEAK)")
+    return ObserveStmt(effect, entity, at, leak)
+
+
+def _parse_settle(ts: _Tokens) -> SettleStmt:
+    effect: str | None = None
+    if not ts.peek_kw("UNTIL"):
+        effect = ts.next("effect name or UNTIL")
+    ts.expect("UNTIL")
+    until = parse_time(ts.next("time"))
+    entity: str | None = None
+    if ts.peek_kw("FOR"):
+        ts.next("FOR")
+        entity = ts.next("entity")
+    return SettleStmt(until, effect, entity)
+
+
+def _parse_links(ts: _Tokens) -> LinksQuery:
+    ts.expect("OF")
+    effect = ts.next("effect name")
+    entity: str | None = None
+    min_support = 1.0
+    while not ts.done():
+        kw = ts.next("clause").upper()
+        if kw == "FOR":
+            entity = ts.next("entity")
+        elif kw == "MIN":
+            min_support = _number(ts.next("min support"), "MIN")
+            if min_support < 0:
+                raise QueryError("MIN must be >= 0")
+        else:
+            raise QueryError(f"unexpected {kw!r} (expected FOR or MIN)")
+    return LinksQuery(effect, entity, min_support)
+
+
 # ---------------------------------------------------------------------------
 # Execution
 # ---------------------------------------------------------------------------
@@ -377,9 +486,10 @@ def execute(
     db: HeapDB,
     stmt: Statement | str,
     clock: Callable[[], float] = _time.time,
-) -> QueryResult | CalibrationReport | RiskResult | str:
+) -> QueryResult | CalibrationReport | RiskResult | LinkReport | ObserveReport | SettleReport | str:
     """Run a statement. Queries return a QueryResult (or CalibrationReport,
-    RiskResult); writes return a message."""
+    RiskResult, LinkReport); OBSERVE and SETTLE return their reports; other
+    writes return a message."""
     if isinstance(stmt, str):
         stmt = parse(stmt)
     now = clock()
@@ -403,6 +513,12 @@ def execute(
         return (f"ok: confirmed #{stmt.confirmed}"
                 + (f", rejected {', '.join('#' + str(r) for r in stmt.rejected)}"
                    if stmt.rejected else ""))
+    if isinstance(stmt, ObserveStmt):
+        return db.observe(stmt.entity, stmt.effect, stmt.at.resolve(now), leak=stmt.leak)
+    if isinstance(stmt, SettleStmt):
+        return db.settle(stmt.until.resolve(now), effects=stmt.effect, entity=stmt.entity)
+    if isinstance(stmt, LinksQuery):
+        return db.link_report(stmt.effect, entity=stmt.entity, min_support=stmt.min_support)
     if isinstance(stmt, InsertStmt):
         ev = db.insert(stmt.entity, stmt.at.resolve(now), stmt.type, stmt.features,
                        stmt.weight, attrs=dict(stmt.attrs))
@@ -410,9 +526,10 @@ def execute(
     raise QueryError(f"cannot execute {stmt!r}")  # pragma: no cover
 
 
-def format_result(res: QueryResult | CalibrationReport | RiskResult) -> str:
-    """Pretty-print a QueryResult, CalibrationReport or RiskResult."""
-    if isinstance(res, (CalibrationReport, RiskResult)):
+def format_result(res: QueryResult | CalibrationReport | RiskResult | LinkReport
+                  | ObserveReport | SettleReport) -> str:
+    """Pretty-print a QueryResult or any of the report types."""
+    if isinstance(res, (CalibrationReport, RiskResult, LinkReport, ObserveReport, SettleReport)):
         return str(res)
     who = f"entities {res.entity}" if res.is_group else res.entity
     lines = [f"Top causes of '{res.effect}' for {who} at t={format_time(res.at)}:"]

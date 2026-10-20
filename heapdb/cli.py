@@ -11,6 +11,15 @@ Statements::
     RISK OF <effect> FOR <entity> FEATURES f1,f2 [WEIGHT <dose>] [TYPE <t>]
         [ATTRS k=v,k=v] [EXPLAIN]      pre-event risk of a candidate that has
                                        not happened yet (e.g. an open PR)
+    OBSERVE <effect> FOR <entity> [AT <time>] [LEAK <x>]
+                                       an effect occurred, cause unknown:
+                                       observational (soft EM) learning
+    SETTLE [<effect>] UNTIL <time> [FOR <entity>]
+                                       negative evidence for events whose
+                                       window passed without the effect
+    LINKS OF <effect> [FOR <entity>] [MIN <n>]
+                                       learned links with 90% intervals and
+                                       lift (associations, not causal effects)
 
 ``<time>``: seconds, now, now-2h, ISO-8601. ``<duration>``: 90, 30m, 12h, 2d.
 
@@ -42,7 +51,15 @@ from typing import Callable, TextIO
 
 from .kernels import ExponentialDecay, GammaKernel, Kernel, LogNormalKernel, WindowKernel
 from .query import QueryError, execute, format_result, parse_duration
-from .store import CalibrationReport, HeapDB, QueryResult, RiskResult
+from .store import (
+    CalibrationReport,
+    HeapDB,
+    LinkReport,
+    ObserveReport,
+    QueryResult,
+    RiskResult,
+    SettleReport,
+)
 
 HELP = __doc__ or ""
 
@@ -117,7 +134,8 @@ def handle_line(db: HeapDB, line: str, clock: Callable[[], float]) -> tuple[Heap
             return db, f"ok: loaded {db!r}"
         raise QueryError(f"unknown command {cmd!r}; try .help")
     out = execute(db, line, clock=clock)
-    if isinstance(out, (QueryResult, CalibrationReport, RiskResult)):
+    if isinstance(out, (QueryResult, CalibrationReport, RiskResult, LinkReport,
+                        ObserveReport, SettleReport)):
         return db, format_result(out)
     return db, out
 
