@@ -1,0 +1,51 @@
+{"kind": "meta", "version": 2, "bucket_seconds": 900.0, "max_sets_per_segment": 64, "next_id": 41, "event_types": {}}
+{"kind": "effect", "name": "bloating", "kernel": {"kind": "lognormal", "median": 7200.0, "sigma": 0.8, "tail_sigmas": 4.0}, "links": {"default_prior": [1.0, 4.0], "global_pseudocount": 5.0, "hierarchical": true, "priors": {"beans": [4.0, 1.0]}, "global": {"beans": [0.9174311926605505, 1.0825688073394495], "f2": [0.0, 3.0], "f4": [1.177894048366628, 1.8221059516333722], "oats": [0.9881094933120065, 5.011890506687994], "rice": [0.7210352260443809, 3.2789647739556194]}, "entities": {"me": {"beans": [0.9174311926605505, 1.0825688073394495], "f2": [0.0, 3.0], "f4": [1.177894048366628, 1.8221059516333722], "oats": [0.9881094933120065, 5.011890506687994], "rice": [0.7210352260443809, 3.2789647739556194]}}, "joint": {}}, "cause_types": ["meal"], "credit": "proportional", "rules": [], "pending_rules": []}
+{"kind": "effect", "name": "latency", "kernel": {"kind": "exp", "half_life": 1800.0, "horizon_half_lives": 10.0}, "links": {"default_prior": [1.0, 4.0], "global_pseudocount": 5.0, "hierarchical": true, "priors": {}, "global": {}, "entities": {}, "joint": {}}, "cause_types": null, "credit": "proportional", "rules": [{"name": "f0 dampened", "multiplier": 0.3, "types": ["meal"], "predicate": false}, {"name": "pred", "multiplier": 0.5, "types": null, "predicate": true}], "pending_rules": []}
+{"kind": "effect", "name": "incident", "kernel": {"kind": "window", "min_lag": 0.0, "max_lag": 21600.0}, "links": {"default_prior": [1.0, 4.0], "global_pseudocount": 5.0, "hierarchical": true, "priors": {}, "global": {}, "entities": {}, "joint": {}}, "cause_types": null, "credit": "proportional", "rules": [], "pending_rules": []}
+{"kind": "effect", "name": "headache", "kernel": {"kind": "gamma", "shape": 2.5, "scale": 1800.0, "tail_stds": 6.0}, "links": {"default_prior": [1.0, 4.0], "global_pseudocount": 5.0, "hierarchical": true, "priors": {}, "global": {}, "entities": {}, "joint": {}}, "cause_types": null, "credit": "proportional", "rules": [], "pending_rules": []}
+{"kind": "event", "id": 1, "entity": "you", "time": 0.0, "type": "snack", "features": ["beans", "dairy", "f0"], "weight": 1.0}
+{"kind": "event", "id": 2, "entity": "me", "time": 1700.0, "type": "meal", "features": ["f1", "oats", "rice"], "weight": 1.5}
+{"kind": "event", "id": 3, "entity": "you", "time": 3400.0, "type": "meal", "features": ["f2", "oats", "rice"], "weight": 2.0}
+{"kind": "event", "id": 4, "entity": "me", "time": 5100.0, "type": "meal", "features": ["beans", "f3", "oats"], "weight": 1.0}
+{"kind": "event", "id": 5, "entity": "you", "time": 6800.0, "type": "meal", "features": ["dairy", "f4", "rice"], "weight": 1.5}
+{"kind": "event", "id": 6, "entity": "me", "time": 8500.0, "type": "meal", "features": ["f0", "oats", "rice"], "weight": 2.0}
+{"kind": "event", "id": 7, "entity": "you", "time": 10200.0, "type": "snack", "features": ["beans", "f1", "oats"], "weight": 1.0}
+{"kind": "event", "id": 8, "entity": "me", "time": 11900.0, "type": "meal", "features": ["f2", "oats", "rice"], "weight": 1.5}
+{"kind": "event", "id": 9, "entity": "you", "time": 13600.0, "type": "meal", "features": ["dairy", "f3", "rice"], "weight": 2.0}
+{"kind": "event", "id": 10, "entity": "me", "time": 15300.0, "type": "meal", "features": ["beans", "f4", "oats"], "weight": 1.0}
+{"kind": "event", "id": 11, "entity": "you", "time": 17000.0, "type": "meal", "features": ["f0", "oats", "rice"], "weight": 1.5}
+{"kind": "event", "id": 12, "entity": "me", "time": 18700.0, "type": "meal", "features": ["f1", "oats", "rice"], "weight": 2.0}
+{"kind": "event", "id": 13, "entity": "you", "time": 20400.0, "type": "snack", "features": ["beans", "dairy", "f2"], "weight": 1.0}
+{"kind": "event", "id": 14, "entity": "me", "time": 22100.0, "type": "meal", "features": ["f3", "oats", "rice"], "weight": 1.5}
+{"kind": "event", "id": 15, "entity": "you", "time": 23800.0, "type": "meal", "features": ["f4", "oats", "rice"], "weight": 2.0}
+{"kind": "event", "id": 16, "entity": "me", "time": 25500.0, "type": "meal", "features": ["beans", "f0", "oats"], "weight": 1.0}
+{"kind": "event", "id": 17, "entity": "you", "time": 27200.0, "type": "meal", "features": ["dairy", "f1", "rice"], "weight": 1.5}
+{"kind": "event", "id": 18, "entity": "me", "time": 28900.0, "type": "meal", "features": ["f2", "oats", "rice"], "weight": 2.0}
+{"kind": "event", "id": 19, "entity": "you", "time": 30600.0, "type": "snack", "features": ["beans", "f3", "oats"], "weight": 1.0}
+{"kind": "event", "id": 20, "entity": "me", "time": 32300.0, "type": "meal", "features": ["f4", "oats", "rice"], "weight": 1.5}
+{"kind": "event", "id": 21, "entity": "you", "time": 34000.0, "type": "meal", "features": ["dairy", "f0", "rice"], "weight": 2.0}
+{"kind": "event", "id": 22, "entity": "me", "time": 35700.0, "type": "meal", "features": ["beans", "f1", "oats"], "weight": 1.0}
+{"kind": "event", "id": 23, "entity": "you", "time": 37400.0, "type": "meal", "features": ["f2", "oats", "rice"], "weight": 1.5}
+{"kind": "event", "id": 24, "entity": "me", "time": 39100.0, "type": "meal", "features": ["f3", "oats", "rice"], "weight": 2.0}
+{"kind": "event", "id": 25, "entity": "you", "time": 40800.0, "type": "snack", "features": ["beans", "dairy", "f4"], "weight": 1.0}
+{"kind": "event", "id": 26, "entity": "me", "time": 42500.0, "type": "meal", "features": ["f0", "oats", "rice"], "weight": 1.5}
+{"kind": "event", "id": 27, "entity": "you", "time": 44200.0, "type": "meal", "features": ["f1", "oats", "rice"], "weight": 2.0}
+{"kind": "event", "id": 28, "entity": "me", "time": 45900.0, "type": "meal", "features": ["beans", "f2", "oats"], "weight": 1.0}
+{"kind": "event", "id": 29, "entity": "you", "time": 47600.0, "type": "meal", "features": ["dairy", "f3", "rice"], "weight": 1.5}
+{"kind": "event", "id": 30, "entity": "me", "time": 49300.0, "type": "meal", "features": ["f4", "oats", "rice"], "weight": 2.0}
+{"kind": "event", "id": 31, "entity": "you", "time": 51000.0, "type": "snack", "features": ["beans", "f0", "oats"], "weight": 1.0}
+{"kind": "event", "id": 32, "entity": "me", "time": 52700.0, "type": "meal", "features": ["f1", "oats", "rice"], "weight": 1.5}
+{"kind": "event", "id": 33, "entity": "you", "time": 54400.0, "type": "meal", "features": ["dairy", "f2", "rice"], "weight": 2.0}
+{"kind": "event", "id": 34, "entity": "me", "time": 56100.0, "type": "meal", "features": ["beans", "f3", "oats"], "weight": 1.0}
+{"kind": "event", "id": 35, "entity": "you", "time": 57800.0, "type": "meal", "features": ["f4", "oats", "rice"], "weight": 1.5}
+{"kind": "event", "id": 36, "entity": "me", "time": 59500.0, "type": "meal", "features": ["f0", "oats", "rice"], "weight": 2.0}
+{"kind": "event", "id": 37, "entity": "you", "time": 61200.0, "type": "snack", "features": ["beans", "dairy", "f1"], "weight": 1.0}
+{"kind": "event", "id": 38, "entity": "me", "time": 62900.0, "type": "meal", "features": ["f2", "oats", "rice"], "weight": 1.5}
+{"kind": "event", "id": 39, "entity": "you", "time": 64600.0, "type": "meal", "features": ["f3", "oats", "rice"], "weight": 2.0}
+{"kind": "event", "id": 40, "entity": "me", "time": 66300.0, "type": "meal", "features": ["beans", "f4", "oats"], "weight": 1.0}
+{"kind": "calibration", "effect": "bloating", "entity": "me", "event_id": 10, "at": 17100.0, "score": 0.5643463261684356, "confirmed": true}
+{"kind": "calibration", "effect": "bloating", "entity": "me", "event_id": 8, "at": 17100.0, "score": 0.6775401029396817, "confirmed": false}
+{"kind": "calibration", "effect": "bloating", "entity": "me", "event_id": 20, "at": 34100.0, "score": 0.44051670878671917, "confirmed": true}
+{"kind": "calibration", "effect": "bloating", "entity": "me", "event_id": 18, "at": 34100.0, "score": 0.7914180344600377, "confirmed": false}
+{"kind": "calibration", "effect": "bloating", "entity": "me", "event_id": 30, "at": 51100.0, "score": 0.6253689534764576, "confirmed": true}
+{"kind": "calibration", "effect": "bloating", "entity": "me", "event_id": 28, "at": 51100.0, "score": 0.8081633833031363, "confirmed": false}

@@ -12,6 +12,8 @@ htmlcov/
 .venv/
 venv/
 *.jsonl
+# ...except committed test fixtures (snapshot format compatibility)
+!crates/heapdb/tests/fixtures/*.jsonl
 .DS_Store
 target/
 *.so
