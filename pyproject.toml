@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "heapdb"
+version = "0.1.0"
+description = "Reference implementation of HeapDB: pop the most likely cause, right now. Ranked, explainable attribution over an append-only event stream."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+dependencies = []
+keywords = ["database", "attribution", "root-cause-analysis", "top-k", "event-stream", "causal"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Database",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+heapdb = "heapdb.cli:main"
+
+[tool.setuptools]
+packages = ["heapdb"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
