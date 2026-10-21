@@ -582,6 +582,12 @@ fn stmt_to_py(py: Python<'_>, s: Statement) -> PyResult<Py<PyAny>> {
         Statement::Observe(inner) => Py::new(py, PyObserveStmt { inner })?.into_any(),
         Statement::Settle(inner) => Py::new(py, PySettleStmt { inner })?.into_any(),
         Statement::Links(inner) => Py::new(py, PyLinksQuery { inner })?.into_any(),
+        // Heap statements have no AST class; they stay text.
+        Statement::Heap(_) => {
+            return Err(crate::conv::QueryError::new_err(
+                "heap statements (CREATE HEAP, PUSH, PEEK, ...) run on heapdb.Heaps: use Heaps.execute(...)",
+            ))
+        }
     })
 }
 
@@ -619,6 +625,7 @@ fn output_to_py(py: Python<'_>, out: Output) -> PyResult<Py<PyAny>> {
         Output::Observe(inner) => Py::new(py, PyObserveReport { inner })?.into_any(),
         Output::Settle(inner) => Py::new(py, PySettleReport { inner })?.into_any(),
         Output::Message(m) => m.into_pyobject(py)?.into_any().unbind(),
+        Output::Heap(h) => crate::heaps::heap_output_to_py(py, h)?,
     })
 }
 

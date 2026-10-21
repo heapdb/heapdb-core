@@ -12,6 +12,7 @@ mod conv;
 mod db;
 mod event;
 mod fdh;
+mod heaps;
 mod kernels;
 mod query;
 mod results;
@@ -133,6 +134,12 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     m.add_class::<fdh::PyForwardDecayHeap>()?;
     m.add_class::<fdh::PyPopped>()?;
+
+    m.add_class::<heaps::PyHeaps>()?;
+    m.add_class::<heaps::PyRanked>()?;
+    m.add_class::<heaps::PyHeapItem>()?;
+    m.add_class::<heaps::PyHeapInfo>()?;
+    m.add("HAS_POSTGRES", cfg!(feature = "postgres"))?;
 
     m.add_class::<query::PyTimeExpr>()?;
     m.add_class::<query::PyTopCausesQuery>()?;

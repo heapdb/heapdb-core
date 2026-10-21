@@ -17,3 +17,8 @@ heapdb.workspace = true
 pyo3.workspace = true
 serde_json.workspace = true
 indexmap.workspace = true
+
+[features]
+default = []
+# Heaps(persist_to="postgres://...") via the heapdb-postgres crate (enabled in release wheels).
+postgres = []

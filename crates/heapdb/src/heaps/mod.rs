@@ -25,6 +25,7 @@
 //! [`decay_exp`]), so they agree to the last bit or close to it.
 
 mod filter;
+pub mod hql;
 mod memory;
 mod native;
 mod ops;

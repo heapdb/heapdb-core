@@ -2,9 +2,10 @@
 //! binary and the Python `heapdb.cli` module.
 
 use crate::error::{Error, ErrorKind, Result};
+use crate::heaps::HeapBackend;
 use crate::kernels::Kernel;
 use crate::pyfmt::{fmt_g6, repr_str, repr_str_list};
-use crate::query::{execute_str, parse_duration, py_float};
+use crate::query::{execute_str, execute_str_with, parse_duration, py_float};
 use crate::store::{EffectOptions, HeapDB, NewEvent};
 
 /// Help text of the REPL.
@@ -30,6 +31,27 @@ Statements::
     LINKS OF <effect> [FOR <entity>] [MIN <n>]
                                        learned links with 90% intervals and
                                        lift (associations, not causal effects)
+
+Keyed heaps (named priority queues ordered by forward decay)::
+
+    CREATE HEAP <heap> HALF LIFE <duration> [LANDMARK <time>] [META {json}]
+    PUSH <id> INTO <heap> WEIGHT <w> [AT <time>] [ATTRS {json}]
+    SET BASE <id> IN <heap> TO <base>
+    SET ATTRS <id> IN <heap> TO {json} [MERGE]
+    PEEK <k> FROM <heap> [AT <time>] [WHERE <condition>]
+    POP FROM <heap> [AT <time>] [WHERE <condition>]
+    REMOVE <id> FROM <heap>
+    REBASE <heap> [AT <time>] [HALF LIFE <duration>]
+    DROP HEAP <heap>
+    SHOW HEAPS
+                                       names and ids: bare words or 'quoted';
+                                       <condition>: AND / OR / NOT / ( ),
+                                       attr = != < <= > >= value,
+                                       attr [NOT] IN (v, ...), attr CONTAINS v,
+                                       attr CONTAINS ALL (...),
+                                       attr SUBSET OF (...), attr EXISTS,
+                                       attr MISSING; values: 'text', 1.5,
+                                       TRUE, FALSE
 
 ``<time>``: seconds, now, now-2h, ISO-8601. ``<duration>``: 90, 30m, 12h, 2d.
 
@@ -109,8 +131,28 @@ pub fn load_demo(db: &mut HeapDB, now: f64) -> Result<()> {
     Ok(())
 }
 
-/// Process one REPL line. `clock` is called for statements only.
+/// Process one REPL line. `clock` is called for statements only. Heap
+/// statements fail (no heap backend): see [`handle_line_with`].
 pub fn handle_line(db: &mut HeapDB, line: &str, clock: &mut dyn FnMut() -> Result<f64>) -> Result<Outcome> {
+    handle(db, None, line, clock)
+}
+
+/// [`handle_line`] with heap statements running against `heaps`.
+pub fn handle_line_with(
+    db: &mut HeapDB,
+    heaps: &mut dyn HeapBackend,
+    line: &str,
+    clock: &mut dyn FnMut() -> Result<f64>,
+) -> Result<Outcome> {
+    handle(db, Some(heaps), line, clock)
+}
+
+fn handle(
+    db: &mut HeapDB,
+    heaps: Option<&mut dyn HeapBackend>,
+    line: &str,
+    clock: &mut dyn FnMut() -> Result<f64>,
+) -> Result<Outcome> {
     let line = line.trim();
     if line.is_empty() || line.starts_with('#') {
         return Ok(Outcome::Output(None));
@@ -220,7 +262,10 @@ pub fn handle_line(db: &mut HeapDB, line: &str, clock: &mut dyn FnMut() -> Resul
         return Ok(Outcome::Output(Some(out)));
     }
     let now = clock()?;
-    let out = execute_str(db, line, now)?;
+    let out = match heaps {
+        Some(h) => execute_str_with(db, h, line, now)?,
+        None => execute_str(db, line, now)?,
+    };
     Ok(Outcome::Output(Some(out.to_string())))
 }
 
