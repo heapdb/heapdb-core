@@ -20,10 +20,12 @@ use crate::ids::is_database_id;
 use crate::manager::{Need, Route};
 use crate::schema::EffectReq;
 use crate::state::{
-    is_mutating, EventTypeReq, FeedbackReq, HqlReq, InsertReq, ObserveReq, RiskReq, RuleReq, SettleReq,
-    TopCausesReq, WalOp, MAX_BATCH,
+    hql_scope, is_mutating, parse_filter, push_op, AttrsReq, BaseReq, CreateHeapReq, EventTypeReq,
+    FeedbackReq, HqlReq, InsertReq, ObserveReq, PopReq, PushReq, RebaseReq, RiskReq, RuleReq, SettleReq,
+    TopCausesReq, TopReq, WalOp, MAX_BATCH,
 };
 use crate::storage::{DbRecord, Scope};
+use heapdb::heaps::HeapOp;
 
 /// Header marking a request forwarded by another node.
 pub const FORWARDED_HEADER: &str = "x-heapdb-forwarded";
@@ -59,6 +61,81 @@ pub enum DataOp {
     Forget(String),
     /// `POST /hql`
     Hql,
+    /// `GET /heaps`
+    HeapList,
+    /// `PUT /heaps/{heap}`
+    HeapCreate(String),
+    /// `GET /heaps/{heap}`
+    HeapGet(String),
+    /// `DELETE /heaps/{heap}`
+    HeapDrop(String),
+    /// `POST /heaps/{heap}/push`
+    HeapPush(String),
+    /// `POST /heaps/{heap}/base`
+    HeapBase(String),
+    /// `POST /heaps/{heap}/attrs`
+    HeapAttrs(String),
+    /// `POST /heaps/{heap}/top`
+    HeapTop(String),
+    /// `POST /heaps/{heap}/pop`
+    HeapPop(String),
+    /// `POST /heaps/{heap}/rebase`
+    HeapRebase(String),
+    /// `GET /heaps/{heap}/items/{item}`
+    ItemGet(String, String),
+    /// `DELETE /heaps/{heap}/items/{item}`
+    ItemRemove(String, String),
+}
+
+/// Routes below `/heaps` (heap names and item ids are one percent-encoded
+/// path segment each).
+fn parse_heap_route(method: &Method, rest: &str, r: &str) -> ApiResult<DataOp> {
+    let not_found = || ApiError::not_found(format!("no route {rest}"));
+    let want = |m: Method, op: DataOp| -> ApiResult<DataOp> {
+        if *method == m {
+            Ok(op)
+        } else {
+            Err(method_not_allowed(method, rest))
+        }
+    };
+    if r == "/heaps" {
+        return want(Method::GET, DataOp::HeapList);
+    }
+    let tail = r.strip_prefix("/heaps/").ok_or_else(not_found)?;
+    let segs: Vec<&str> = tail.split('/').collect();
+    if segs.iter().any(|s| s.is_empty()) {
+        return Err(not_found());
+    }
+    let heap = percent_decode(segs[0])?;
+    match segs.as_slice() {
+        [_] => match *method {
+            Method::PUT => Ok(DataOp::HeapCreate(heap)),
+            Method::GET => Ok(DataOp::HeapGet(heap)),
+            Method::DELETE => Ok(DataOp::HeapDrop(heap)),
+            _ => Err(method_not_allowed(method, rest)),
+        },
+        [_, action] => {
+            let op = match *action {
+                "push" => DataOp::HeapPush(heap),
+                "base" => DataOp::HeapBase(heap),
+                "attrs" => DataOp::HeapAttrs(heap),
+                "top" => DataOp::HeapTop(heap),
+                "pop" => DataOp::HeapPop(heap),
+                "rebase" => DataOp::HeapRebase(heap),
+                _ => return Err(not_found()),
+            };
+            want(Method::POST, op)
+        }
+        [_, "items", item] => {
+            let item = percent_decode(item)?;
+            match *method {
+                Method::GET => Ok(DataOp::ItemGet(heap, item)),
+                Method::DELETE => Ok(DataOp::ItemRemove(heap, item)),
+                _ => Err(method_not_allowed(method, rest)),
+            }
+        }
+        _ => Err(not_found()),
+    }
 }
 
 fn method_not_allowed(method: &Method, path: &str) -> ApiError {
@@ -84,6 +161,11 @@ pub fn parse_route(method: &Method, rest: &str) -> ApiResult<DataOp> {
             return Err(ApiError::not_found(format!("no route {rest}")));
         }
         return want(Method::DELETE, DataOp::Forget(percent_decode(ent)?));
+    }
+    // Only the raw (still encoded) path is split, so %2F inside a heap name
+    // stays part of the name.
+    if r == "/heaps" || r.starts_with("/heaps/") {
+        return parse_heap_route(method, rest, r);
     }
     match r {
         "" => want(Method::GET, DataOp::Info),
@@ -119,11 +201,16 @@ fn need_of(op: &DataOp, b: &Bytes) -> ApiResult<Need> {
         DataOp::Hql => {
             let req: HqlReq = body(b)?;
             let stmt = heapdb::parse(&req.query)?;
-            Need::Scope(if is_mutating(&stmt) {
-                Scope::Write
-            } else {
-                Scope::Read
-            })
+            Need::Scope(hql_scope(&stmt))
+        }
+        DataOp::HeapCreate(_) | DataOp::HeapDrop(_) | DataOp::HeapRebase(_) => Need::Scope(Scope::Admin),
+        DataOp::HeapPush(_)
+        | DataOp::HeapBase(_)
+        | DataOp::HeapAttrs(_)
+        | DataOp::HeapPop(_)
+        | DataOp::ItemRemove(..) => Need::Scope(Scope::Write),
+        DataOp::HeapList | DataOp::HeapGet(_) | DataOp::HeapTop(_) | DataOp::ItemGet(..) => {
+            Need::Scope(Scope::Read)
         }
     })
 }
@@ -181,6 +268,18 @@ async fn serve(db: &OpenDb, rec: &DbRecord, op: DataOp, query: Option<&str>, raw
     db.admit(rec).await?;
     match op {
         DataOp::Info => unreachable!("handled above"),
+        DataOp::HeapList
+        | DataOp::HeapCreate(_)
+        | DataOp::HeapGet(_)
+        | DataOp::HeapDrop(_)
+        | DataOp::HeapPush(_)
+        | DataOp::HeapBase(_)
+        | DataOp::HeapAttrs(_)
+        | DataOp::HeapTop(_)
+        | DataOp::HeapPop(_)
+        | DataOp::HeapRebase(_)
+        | DataOp::ItemGet(..)
+        | DataOp::ItemRemove(..) => serve_heap(db, rec, op, query, raw).await,
         DataOp::Effects => {
             let req: EffectReq = body(&raw)?;
             db.write(WalOp::RegisterEffect(req)).await
@@ -304,6 +403,10 @@ async fn serve(db: &OpenDb, rec: &DbRecord, op: DataOp, query: Option<&str>, raw
             let stmt = heapdb::parse(&req.query)?;
             if is_mutating(&stmt) {
                 db.check_write_quota(rec, usize::from(matches!(stmt, heapdb::Statement::Insert(_))))?;
+                // Heap statements are validated before they reach the WAL.
+                if let heapdb::Statement::Heap(h) = &stmt {
+                    heap_names_ok(h)?;
+                }
                 db.write(WalOp::Hql {
                     query: req.query,
                     now,
@@ -313,6 +416,141 @@ async fn serve(db: &OpenDb, rec: &DbRecord, op: DataOp, query: Option<&str>, raw
                 db.read(|s| s.hql_read(&stmt, now)).await
             }
         }
+    }
+}
+
+fn heap_names_ok(h: &heapdb::heaps::hql::HeapStmt) -> ApiResult<()> {
+    use heapdb::heaps::hql::HeapStmt as S;
+    let name = match h {
+        S::Create { heap, .. }
+        | S::Drop { heap }
+        | S::Push { heap, .. }
+        | S::SetBase { heap, .. }
+        | S::SetAttrs { heap, .. }
+        | S::Peek { heap, .. }
+        | S::Pop { heap, .. }
+        | S::Remove { heap, .. }
+        | S::Rebase { heap, .. } => heap,
+        S::Show => return Ok(()),
+    };
+    heapdb::heaps::check_name("heap name", name).map_err(|e| ApiError::invalid(e.to_string()))
+}
+
+fn batch_size(n: usize) -> ApiResult<()> {
+    if n == 0 {
+        return Err(ApiError::bad_request("items must not be empty"));
+    }
+    if n > MAX_BATCH {
+        return Err(ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "batch_too_large",
+            format!("at most {MAX_BATCH} items per request, got {n}"),
+        ));
+    }
+    Ok(())
+}
+
+/// `?now=` (default: the server clock).
+fn now_param(query: Option<&str>) -> ApiResult<f64> {
+    match query_pairs(query)?.get("now") {
+        Some(v) if !v.is_empty() => parse_f64("now", v),
+        _ => Ok(now_secs()),
+    }
+}
+
+/// Body that may be empty (`{}` implied).
+fn opt_body<T: DeserializeOwned + Default>(b: &Bytes) -> ApiResult<T> {
+    if b.is_empty() {
+        Ok(T::default())
+    } else {
+        body(b)
+    }
+}
+
+async fn serve_heap(
+    db: &OpenDb,
+    rec: &DbRecord,
+    op: DataOp,
+    query: Option<&str>,
+    raw: Bytes,
+) -> ApiResult<Value> {
+    let name_ok =
+        |n: &str| heapdb::heaps::check_name("heap name", n).map_err(|e| ApiError::invalid(e.to_string()));
+    match op {
+        DataOp::HeapList => db.read(|s| s.heap_list()).await,
+        DataOp::HeapGet(h) => db.read(|s| s.heap_info(&h)).await,
+        DataOp::HeapCreate(h) => {
+            name_ok(&h)?;
+            let req: CreateHeapReq = body(&raw)?;
+            db.check_write_quota(rec, 0)?;
+            db.write(WalOp::Heap(HeapOp::CreateHeap {
+                name: h,
+                half_life: req.half_life,
+                landmark: req.landmark,
+                now: now_secs(),
+                meta: req.meta,
+            }))
+            .await
+        }
+        DataOp::HeapDrop(h) => db.write(WalOp::Heap(HeapOp::DropHeap { name: h })).await,
+        DataOp::HeapPush(h) => {
+            let req: PushReq = body(&raw)?;
+            batch_size(req.items.len())?;
+            db.check_write_quota(rec, 0)?;
+            db.write(push_op(&h, req.items, now_secs())).await
+        }
+        DataOp::HeapBase(h) => {
+            let req: BaseReq = body(&raw)?;
+            batch_size(req.items.len())?;
+            db.check_write_quota(rec, 0)?;
+            db.write(WalOp::Heap(HeapOp::SetBase {
+                heap: h,
+                items: req.items,
+            }))
+            .await
+        }
+        DataOp::HeapAttrs(h) => {
+            let req: AttrsReq = body(&raw)?;
+            batch_size(req.items.len())?;
+            db.check_write_quota(rec, 0)?;
+            db.write(WalOp::Heap(HeapOp::SetAttrs {
+                heap: h,
+                items: req.items,
+            }))
+            .await
+        }
+        DataOp::HeapTop(h) => {
+            let req: TopReq = body(&raw)?;
+            let filter = parse_filter(req.filter.as_ref())?;
+            let now = req.now.unwrap_or_else(now_secs);
+            let k = req.k.unwrap_or(10);
+            db.read(|s| s.heap_top(&h, k, now, filter.as_ref())).await
+        }
+        DataOp::HeapPop(h) => {
+            let req: PopReq = opt_body(&raw)?;
+            let filter = parse_filter(req.filter.as_ref())?;
+            db.write(WalOp::Heap(HeapOp::Pop {
+                heap: h,
+                now: req.now.unwrap_or_else(now_secs),
+                filter,
+            }))
+            .await
+        }
+        DataOp::HeapRebase(h) => {
+            let req: RebaseReq = opt_body(&raw)?;
+            db.write(WalOp::Heap(HeapOp::Rebase {
+                heap: h,
+                now: req.now.unwrap_or_else(now_secs),
+                half_life: req.half_life,
+            }))
+            .await
+        }
+        DataOp::ItemGet(h, id) => {
+            let now = now_param(query)?;
+            db.read(|s| s.heap_get(&h, &id, now)).await
+        }
+        DataOp::ItemRemove(h, id) => db.write(WalOp::Heap(HeapOp::Remove { heap: h, id })).await,
+        _ => Err(ApiError::internal("serve_heap called with a non-heap route")),
     }
 }
 
@@ -403,5 +641,34 @@ mod tests {
             "method_not_allowed"
         );
         assert_eq!(parse_route(&Method::GET, "/nope").unwrap_err().code, "not_found");
+        assert_eq!(parse_route(&Method::GET, "/heaps").unwrap(), DataOp::HeapList);
+        assert_eq!(
+            parse_route(&Method::PUT, "/heaps/acme%2Fcheckout").unwrap(),
+            DataOp::HeapCreate("acme/checkout".into())
+        );
+        assert_eq!(
+            parse_route(&Method::POST, "/heaps/w/pop").unwrap(),
+            DataOp::HeapPop("w".into())
+        );
+        assert_eq!(
+            parse_route(&Method::DELETE, "/heaps/a%20b/items/CHK%2F12").unwrap(),
+            DataOp::ItemRemove("a b".into(), "CHK/12".into())
+        );
+        assert_eq!(
+            parse_route(&Method::GET, "/heaps/w/push").unwrap_err().code,
+            "method_not_allowed"
+        );
+        assert_eq!(
+            parse_route(&Method::POST, "/heaps/w/nope").unwrap_err().code,
+            "not_found"
+        );
+        assert_eq!(
+            parse_route(&Method::GET, "/heaps//items/x").unwrap_err().code,
+            "not_found"
+        );
+        assert_eq!(
+            parse_route(&Method::POST, "/heaps").unwrap_err().code,
+            "method_not_allowed"
+        );
     }
 }

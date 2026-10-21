@@ -316,7 +316,8 @@ impl HeapBackend for NativeHeaps {
         self.apply(&HeapOp::CreateHeap {
             name: spec.name.clone(),
             half_life: spec.half_life,
-            landmark,
+            landmark: Some(landmark),
+            now: landmark,
             meta: spec.meta.clone(),
         })?;
         Ok(self.mem.heap(&spec.name)?.expect("just created"))

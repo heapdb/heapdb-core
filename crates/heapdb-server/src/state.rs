@@ -4,15 +4,23 @@
 //! same order to the same snapshot gives a bit-identical engine, which is
 //! what recovery relies on.
 //!
-//! Snapshot format: one header line
-//! `{"kind":"heapdb_server","format":1,"database_id","epoch","seq","schema","external_ids"}`
-//! followed by the engine's JSONL snapshot (format v3).
+//! Keyed heaps (`docs/heaps.md`) live next to the engine in a
+//! [`MemoryHeaps`]; their mutations are [`WalOp::Heap`] records (or
+//! [`WalOp::Hql`] for heap statements).
+//!
+//! Snapshot format 2: one header line
+//! `{"kind":"heapdb_server","format":2,"database_id","epoch","seq","schema","external_ids","heaps":N}`,
+//! then N heap records (`{"kind":"heap",...}` / `{"kind":"item",...}`,
+//! see [`MemoryHeaps::to_records`]), then the engine's JSONL snapshot
+//! (format v3). Format 1 (no heap section) still loads, with no heaps.
 
 use std::collections::BTreeMap;
 use std::io::BufRead;
 
+use heapdb::heaps::hql;
+use heapdb::heaps::{AttrsArgs, BaseArgs, HeapBackend, HeapOp, MemoryHeaps, PushArgs};
 use heapdb::query::{Output, Statement};
-use heapdb::{Candidate, Credit, HeapDB, LinkReportOptions, NewEvent, RiskResult, TopK};
+use heapdb::{Candidate, Credit, Filter, HeapDB, LinkReportOptions, NewEvent, RiskResult, TopK};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -25,8 +33,10 @@ use crate::schema::{EffectReq, PredicateSpec, RuleSpec, WeightSpec};
 pub const BUCKET_SECONDS: f64 = 900.0;
 /// Engine set cap per segment.
 pub const MAX_SETS: usize = 64;
-/// Maximum events per `POST /events`.
+/// Maximum events per `POST /events` (and items per heap batch).
 pub const MAX_BATCH: usize = 1000;
+/// Snapshot header format written by this version.
+pub const SNAPSHOT_FORMAT: u32 = 2;
 
 // ---------------------------------------------------------------------------
 // Requests (also WAL payloads)
@@ -263,6 +273,110 @@ pub struct HqlReq {
     pub now: Option<f64>,
 }
 
+/// Body of `PUT /heaps/{heap}`.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateHeapReq {
+    /// Half-life (seconds).
+    pub half_life: f64,
+    /// Landmark (default: now).
+    #[serde(default)]
+    pub landmark: Option<f64>,
+    /// Metadata.
+    #[serde(default)]
+    pub meta: Option<Map<String, Value>>,
+}
+
+/// One item of `POST /heaps/{heap}/push`.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PushIn {
+    /// Item id.
+    pub id: String,
+    /// Weight (default 1).
+    #[serde(default)]
+    pub weight: Option<f64>,
+    /// Time (default: now).
+    #[serde(default)]
+    pub time: Option<f64>,
+    /// Replacement attributes.
+    #[serde(default)]
+    pub attrs: Option<Map<String, Value>>,
+}
+
+/// Body of `POST /heaps/{heap}/push`.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PushReq {
+    /// At most 1000 pushes, applied atomically in order.
+    pub items: Vec<PushIn>,
+}
+
+/// Body of `POST /heaps/{heap}/base`.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BaseReq {
+    /// At most 1000 items.
+    pub items: Vec<BaseArgs>,
+}
+
+/// Body of `POST /heaps/{heap}/attrs`.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AttrsReq {
+    /// At most 1000 items.
+    pub items: Vec<AttrsArgs>,
+}
+
+/// Body of `POST /heaps/{heap}/top`.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TopReq {
+    /// How many (default 10).
+    #[serde(default)]
+    pub k: Option<usize>,
+    /// Clock (default: now).
+    #[serde(default)]
+    pub now: Option<f64>,
+    /// Filter (`docs/heaps.md`).
+    #[serde(default)]
+    pub filter: Option<Value>,
+}
+
+/// Body of `POST /heaps/{heap}/pop`.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PopReq {
+    /// Clock (default: now).
+    #[serde(default)]
+    pub now: Option<f64>,
+    /// Filter.
+    #[serde(default)]
+    pub filter: Option<Value>,
+}
+
+/// Body of `POST /heaps/{heap}/rebase`.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RebaseReq {
+    /// New landmark (default: now).
+    #[serde(default)]
+    pub now: Option<f64>,
+    /// New half-life.
+    #[serde(default)]
+    pub half_life: Option<f64>,
+}
+
+/// A filter from a request body (validated; `bad_request` naming the node).
+pub fn parse_filter(v: Option<&Value>) -> ApiResult<Option<Filter>> {
+    match v {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => Filter::from_json(v)
+            .map(Some)
+            .map_err(|e| ApiError::invalid(e.to_string())),
+    }
+}
+
 /// A mutation, as stored in the WAL.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", content = "args", rename_all = "snake_case")]
@@ -290,6 +404,8 @@ pub enum WalOp {
         /// Also subtract from the global layer.
         scrub_global: bool,
     },
+    /// A keyed-heap mutation (all inputs resolved: no clock reads).
+    Heap(HeapOp),
     /// A mutating query-language statement, with the clock it ran at.
     Hql {
         /// Statement.
@@ -346,6 +462,9 @@ pub struct SnapshotHeader {
     pub schema: Schema,
     /// external_id -> event id.
     pub external_ids: BTreeMap<String, u64>,
+    /// Number of heap records that follow the header (format 2).
+    #[serde(default)]
+    pub heaps: u64,
 }
 
 /// Engine + schema + idempotency index + WAL position.
@@ -356,6 +475,8 @@ pub struct DbState {
     pub schema: Schema,
     /// external_id -> event id.
     pub external_ids: BTreeMap<String, u64>,
+    /// Keyed heaps.
+    pub heaps: MemoryHeaps,
     /// Last applied WAL seq.
     pub seq: u64,
 }
@@ -377,6 +498,7 @@ impl DbState {
             db: HeapDB::new(BUCKET_SECONDS, MAX_SETS).expect("valid constants"),
             schema: Schema::default(),
             external_ids: BTreeMap::new(),
+            heaps: MemoryHeaps::new(),
             seq: 0,
         }
     }
@@ -541,9 +663,10 @@ impl DbState {
                 self.external_ids.retain(|_, id| db.contains(*id));
                 Ok(json!({"counts": json::forget(&rep)}))
             }
+            WalOp::Heap(op) => Ok(self.heaps.apply(op)?),
             WalOp::Hql { query, now } => {
                 let stmt = heapdb::parse(query)?;
-                let out = heapdb::execute(&mut self.db, &stmt, *now)?;
+                let out = heapdb::query::execute_with(&mut self.db, &mut self.heaps, &stmt, *now)?;
                 Ok(json::output(&out))
             }
         }
@@ -680,27 +803,85 @@ impl DbState {
                     ..Default::default()
                 },
             )?),
+            Statement::Heap(h) if !h.is_mutating() => {
+                // PEEK / SHOW HEAPS only read; run them on a shared borrow.
+                Output::Heap(read_heap_stmt(&self.heaps, h, now)?)
+            }
             _ => return Err(ApiError::internal("hql_read called with a mutating statement")),
         };
         Ok(json::output(&out))
     }
 
+    // -- heaps -----------------------------------------------------------------
+
+    /// `GET /heaps/{heap}`.
+    pub fn heap_info(&self, name: &str) -> ApiResult<Value> {
+        match self.heaps.heap(name)? {
+            Some(i) => Ok(i.to_json()),
+            None => Err(heapdb::Error::UnknownHeap(name.to_string()).into()),
+        }
+    }
+
+    /// `GET /heaps`.
+    pub fn heap_list(&self) -> ApiResult<Value> {
+        let v: Vec<Value> = self
+            .heaps
+            .heaps()?
+            .iter()
+            .map(heapdb::HeapInfo::to_json)
+            .collect();
+        Ok(json!({"heaps": v}))
+    }
+
+    /// `GET /heaps/{heap}/items/{item}`.
+    pub fn heap_get(&self, heap: &str, id: &str, now: f64) -> ApiResult<Value> {
+        match self.heaps.get(heap, id, now)? {
+            Some(r) => Ok(r.to_json()),
+            None => Err(ApiError::new(
+                axum::http::StatusCode::NOT_FOUND,
+                "unknown_item",
+                format!(
+                    "no item {} in heap {}",
+                    heapdb::pyfmt::repr_str(id),
+                    heapdb::pyfmt::repr_str(heap)
+                ),
+            )),
+        }
+    }
+
+    /// `POST /heaps/{heap}/top`.
+    pub fn heap_top(&self, heap: &str, k: usize, now: f64, filter: Option<&Filter>) -> ApiResult<Value> {
+        let v: Vec<Value> = self
+            .heaps
+            .top_k(heap, k, now, filter)?
+            .iter()
+            .map(heapdb::Ranked::to_json)
+            .collect();
+        Ok(json!({"items": v}))
+    }
+
     // -- snapshots ---------------------------------------------------------------
 
-    /// Serialise (header line + engine snapshot).
+    /// Serialise (header line + heap records + engine snapshot).
     pub fn snapshot(&self, database_id: &str, epoch: u64, now: f64) -> Vec<u8> {
+        let heap_records = self.heaps.to_records();
         let header = SnapshotHeader {
             kind: "heapdb_server".into(),
-            format: 1,
+            format: SNAPSHOT_FORMAT,
             database_id: database_id.to_string(),
             epoch,
             seq: self.seq,
             created_at: now,
             schema: self.schema.clone(),
             external_ids: self.external_ids.clone(),
+            heaps: heap_records.len() as u64,
         };
         let mut out = serde_json::to_vec(&header).expect("header serialises");
         out.push(b'\n');
+        for r in &heap_records {
+            serde_json::to_writer(&mut out, r).expect("heap records serialise");
+            out.push(b'\n');
+        }
         self.db.save_to(&mut out).expect("writing to memory cannot fail");
         out
     }
@@ -713,8 +894,18 @@ impl DbState {
         r.read_line(&mut first).map_err(|e| e.to_string())?;
         let header: SnapshotHeader =
             serde_json::from_str(first.trim()).map_err(|e| format!("snapshot header: {e}"))?;
-        if header.kind != "heapdb_server" || header.format != 1 {
+        if header.kind != "heapdb_server" || !(1..=SNAPSHOT_FORMAT).contains(&header.format) {
             return Err(format!("unsupported snapshot {}/{}", header.kind, header.format));
+        }
+        let mut heaps = MemoryHeaps::new();
+        for i in 0..header.heaps {
+            let mut line = String::new();
+            r.read_line(&mut line).map_err(|e| e.to_string())?;
+            let rec: Map<String, Value> =
+                serde_json::from_str(line.trim()).map_err(|e| format!("snapshot heap record {i}: {e}"))?;
+            if !heaps.load_record(&rec).map_err(|e| e.to_string())? {
+                return Err(format!("snapshot heap record {i}: unknown kind"));
+            }
         }
         let mut db = HeapDB::load_from(r, "snapshot").map_err(|e| e.to_string())?;
         for (t, w) in &header.schema.event_types {
@@ -733,18 +924,76 @@ impl DbState {
             db,
             schema: header.schema.clone(),
             external_ids: header.external_ids.clone(),
+            heaps,
             seq: header.seq,
         };
         Ok((state, header))
     }
 }
 
+fn read_heap_stmt(h: &MemoryHeaps, stmt: &hql::HeapStmt, now: f64) -> ApiResult<hql::HeapOutput> {
+    use hql::{HeapOutput, HeapStmt};
+    Ok(match stmt {
+        HeapStmt::Peek { heap, k, at, filter } => {
+            let t = at.resolve(now);
+            HeapOutput::Top(heapdb::heaps::HeapTop {
+                heap: heap.clone(),
+                now: t,
+                popped: false,
+                items: h.top_k(heap, *k, t, filter.as_ref())?,
+            })
+        }
+        HeapStmt::Show => HeapOutput::List(h.heaps()?),
+        _ => {
+            return Err(ApiError::internal(
+                "read_heap_stmt called with a mutating statement",
+            ))
+        }
+    })
+}
+
 /// True for statements that change the database.
 pub fn is_mutating(stmt: &Statement) -> bool {
-    matches!(
-        stmt,
-        Statement::Insert(_) | Statement::Feedback(_) | Statement::Observe(_) | Statement::Settle(_)
-    )
+    match stmt {
+        Statement::Heap(h) => h.is_mutating(),
+        _ => matches!(
+            stmt,
+            Statement::Insert(_) | Statement::Feedback(_) | Statement::Observe(_) | Statement::Settle(_)
+        ),
+    }
+}
+
+/// The API scope a statement needs: read for queries (TOP, RISK, LINKS,
+/// CALIBRATION, PEEK, SHOW HEAPS), write for INSERT / FEEDBACK / OBSERVE /
+/// SETTLE / PUSH / SET / POP / REMOVE, admin for CREATE / DROP / REBASE.
+pub fn hql_scope(stmt: &Statement) -> crate::storage::Scope {
+    use crate::storage::Scope;
+    match stmt {
+        Statement::Heap(h) => match h.access() {
+            hql::Access::Read => Scope::Read,
+            hql::Access::Write => Scope::Write,
+            hql::Access::Admin => Scope::Admin,
+        },
+        s if is_mutating(s) => Scope::Write,
+        _ => Scope::Read,
+    }
+}
+
+/// Build the WAL op of a heap push batch, resolving defaults (weight 1,
+/// time `now`).
+pub fn push_op(heap: &str, items: Vec<PushIn>, now: f64) -> WalOp {
+    WalOp::Heap(HeapOp::Push {
+        heap: heap.to_string(),
+        items: items
+            .into_iter()
+            .map(|p| PushArgs {
+                id: p.id,
+                weight: p.weight.unwrap_or(1.0),
+                time: p.time.unwrap_or(now),
+                attrs: p.attrs,
+            })
+            .collect(),
+    })
 }
 
 #[cfg(test)]
@@ -825,6 +1074,126 @@ mod tests {
         }
         s3.apply(&again).unwrap();
         assert_eq!(s3.snapshot("db_x", 1, 0.0), bytes);
+    }
+
+    fn heap_ops() -> Vec<WalOp> {
+        let v = |x: Value| -> WalOp { serde_json::from_value(x).unwrap() };
+        vec![
+            v(
+                json!({"op": "heap", "args": {"op": "create_heap", "args": {"name": "acme/q", "half_life": 3600, "landmark": 1000, "now": 5}}}),
+            ),
+            v(
+                json!({"op": "heap", "args": {"op": "push", "args": {"heap": "acme/q", "items": [
+                    {"id": "a", "weight": 2, "time": 1000, "attrs": {"kind": "bug"}},
+                    {"id": "b", "weight": 1, "time": 1500},
+                    {"id": "a", "weight": 1, "time": 2000}
+                ]}}}),
+            ),
+            v(
+                json!({"op": "heap", "args": {"op": "set_base", "args": {"heap": "acme/q", "items": [{"id": "c", "base": 3}]}}}),
+            ),
+            v(
+                json!({"op": "heap", "args": {"op": "set_attrs", "args": {"heap": "acme/q", "items": [{"id": "b", "attrs": {"kind": "task"}, "merge": true}]}}}),
+            ),
+            v(
+                json!({"op": "hql", "args": {"query": "PUSH d INTO 'acme/q' WEIGHT 5 AT now-1h ATTRS {\"kind\": \"bug\"}", "now": 9000}}),
+            ),
+            v(
+                json!({"op": "heap", "args": {"op": "pop", "args": {"heap": "acme/q", "now": 9000, "filter": {"attr": "kind", "op": "eq", "value": "bug"}}}}),
+            ),
+            v(json!({"op": "heap", "args": {"op": "rebase", "args": {"heap": "acme/q", "now": 9500}}})),
+        ]
+    }
+
+    #[test]
+    fn heaps_replay_and_snapshot() {
+        let mut s = DbState::new();
+        for (i, op) in ops().iter().chain(heap_ops().iter()).enumerate() {
+            s.apply(op).unwrap();
+            s.seq = i as u64 + 1;
+        }
+        let top = s.heap_top("acme/q", 10, 9600.0, None).unwrap();
+        let ids: Vec<&str> = top["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, ["a", "b"], "d was popped (best bug), c is unranked");
+        let bytes = s.snapshot("db_x", 1, 0.0);
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert!(text.starts_with("{\"kind\":\"heapdb_server\",\"format\":2"));
+        let (s2, h) = DbState::from_snapshot(&bytes).unwrap();
+        assert_eq!(h.format, 2);
+        assert_eq!(s2.heaps.to_records(), s.heaps.to_records());
+        assert_eq!(s2.heap_top("acme/q", 10, 9600.0, None).unwrap(), top);
+        // A replay gives the identical snapshot.
+        let mut s3 = DbState::new();
+        for (i, op) in ops().iter().chain(heap_ops().iter()).enumerate() {
+            s3.apply(op).unwrap();
+            s3.seq = i as u64 + 1;
+        }
+        assert_eq!(s3.snapshot("db_x", 1, 0.0), bytes);
+        // A failing heap batch changes nothing (and is not a WAL record).
+        let bad: WalOp = serde_json::from_value(
+            json!({"op": "heap", "args": {"op": "push", "args": {"heap": "acme/q", "items": [
+            {"id": "x", "weight": 1, "time": 0}, {"id": "y", "weight": 0, "time": 0}]}}}),
+        )
+        .unwrap();
+        let e = s.apply(&bad).unwrap_err();
+        assert_eq!(e.code, "invalid_argument");
+        assert!(e.message.contains("items[1]"), "{}", e.message);
+        assert_eq!(s.heaps.to_records(), s2.heaps.to_records());
+    }
+
+    #[test]
+    fn format_1_snapshots_still_load() {
+        // Written by heapdb-server 0.5 (DbState::snapshot before heaps).
+        let bytes = include_bytes!("../tests/fixtures/snapshot_format1.jsonl");
+        assert!(bytes.starts_with(b"{\"kind\":\"heapdb_server\",\"format\":1,"));
+        let (s, h) = DbState::from_snapshot(bytes).unwrap();
+        assert_eq!((h.format, h.seq, h.heaps), (1, 5, 0));
+        assert!(s.heaps.is_empty());
+        assert_eq!(s.db.len(), 2);
+        assert_eq!(s.external_ids.get("a"), Some(&1));
+        assert_eq!(s.schema.rules["bloating"][0].name, "small");
+        let q = TopCausesReq {
+            entity: Some("me".into()),
+            entities: None,
+            effect: "bloating".into(),
+            at: 7300.0,
+            k: Some(3),
+            within: None,
+            explain: true,
+        };
+        let r = s.top_causes(&q).unwrap();
+        assert_eq!(r["causes"][0]["event"]["id"], json!(1));
+        assert_eq!(r["causes"][1]["explanation"]["rules"][0]["name"], json!("small"));
+        // Re-saved, it is format 2 and loads again.
+        let again = s.snapshot("db_fixture0000000000000", 3, 0.0);
+        let (s2, h2) = DbState::from_snapshot(&again).unwrap();
+        assert_eq!(h2.format, 2);
+        assert_eq!(s2.top_causes(&q).unwrap(), r);
+    }
+
+    #[test]
+    fn hql_scopes() {
+        use crate::storage::Scope;
+        for (q, want) in [
+            ("TOP 3 CAUSES OF a FOR b", Scope::Read),
+            ("INSERT meal FOR me", Scope::Write),
+            ("PEEK 3 FROM w", Scope::Read),
+            ("SHOW HEAPS", Scope::Read),
+            ("PUSH a INTO w WEIGHT 1", Scope::Write),
+            ("SET BASE a IN w TO 2", Scope::Write),
+            ("POP FROM w", Scope::Write),
+            ("REMOVE a FROM w", Scope::Write),
+            ("CREATE HEAP w HALF LIFE 1h", Scope::Admin),
+            ("DROP HEAP w", Scope::Admin),
+            ("REBASE w", Scope::Admin),
+        ] {
+            assert_eq!(hql_scope(&heapdb::parse(q).unwrap()), want, "{q}");
+        }
     }
 
     #[test]

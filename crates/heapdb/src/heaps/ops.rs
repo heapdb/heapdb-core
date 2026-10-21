@@ -15,14 +15,18 @@ use crate::event::Attrs;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", content = "args", rename_all = "snake_case")]
 pub enum HeapOp {
-    /// `create_heap` (the landmark is resolved by the caller).
+    /// `create_heap`. `landmark: None` matches an existing heap's landmark
+    /// and defaults to `now` for a new one.
     CreateHeap {
         /// Name.
         name: String,
         /// Half-life (seconds).
         half_life: f64,
         /// Landmark.
-        landmark: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        landmark: Option<f64>,
+        /// The clock (the landmark of a new heap without one).
+        now: f64,
         /// Metadata (`None`: matches anything / `{}` for a new heap).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         meta: Option<Attrs>,
@@ -112,15 +116,16 @@ impl MemoryHeaps {
                 name,
                 half_life,
                 landmark,
+                now,
                 meta,
             } => {
                 let spec = HeapSpec {
                     name: name.clone(),
                     half_life: *half_life,
-                    landmark: Some(*landmark),
+                    landmark: *landmark,
                     meta: meta.clone(),
                 };
-                self.create_heap(&spec, *landmark)?.to_json()
+                self.create_heap(&spec, *now)?.to_json()
             }
             HeapOp::DropHeap { name } => json!({"dropped": self.drop_heap(name)?}),
             HeapOp::Push { heap, items: it } => items(self.push_many(heap, it)?),

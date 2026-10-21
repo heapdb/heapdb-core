@@ -341,6 +341,19 @@ async fn fencing_rejects_stale_owner(env: Env) {
         .unwrap();
     let stale_epoch = format!("/{:020}-", lease.epoch);
     assert!(wal.iter().any(|k| k.contains(&stale_epoch)), "{wal:?}");
+    // A stale heap write is fenced the same way.
+    let r = db
+        .on(&a.url)
+        .post(
+            "/hql",
+            json!({"query": "CREATE HEAP stale HALF LIFE 1h", "now": 0.0}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE, "{}", r.body);
+    db.on(&b.url)
+        .put("/heaps/live", json!({"half_life": 60, "landmark": 0}))
+        .await
+        .ok();
     // b never saw it, and a fresh recovery (node c) ignores it too.
     let q = json!({"entity": "me", "effect": "bloating", "at": 3600.0, "k": 10});
     let on_b = db.on(&b.url).post("/query/top-causes", q.clone()).await.ok();
@@ -362,6 +375,13 @@ async fn fencing_rejects_stale_owner(env: Env) {
         db.on(&c.url).get("").await.ok()["usage"]["events_stored"],
         json!(3)
     );
+    let heaps = db.on(&c.url).get("/heaps").await.ok();
+    assert_eq!(
+        heaps["heaps"].as_array().unwrap().len(),
+        1,
+        "only b's heap survived: {heaps}"
+    );
+    assert_eq!(heaps["heaps"][0]["name"], json!("live"));
     // The stale node eventually fences itself.
     drop(a);
     c.shutdown();

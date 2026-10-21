@@ -242,6 +242,16 @@ impl Db {
         )
         .await
     }
+    pub async fn put(&self, path: &str, body: Value) -> Resp {
+        send(
+            &self.c,
+            reqwest::Method::PUT,
+            &self.url(path),
+            Some(&self.key),
+            Some(body),
+        )
+        .await
+    }
     pub async fn delete(&self, path: &str) -> Resp {
         send(
             &self.c,
