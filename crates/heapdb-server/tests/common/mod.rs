@@ -52,8 +52,16 @@ pub fn fast_leases(c: &mut Config) {
     c.lease_renew = Duration::from_millis(300);
 }
 
+/// Builds a node's backends inside the node's runtime.
+pub type BackendsFactory =
+    Box<dyn FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = Backends> + Send>> + Send>;
+
 impl TestNode {
     pub fn start(cfg: Config, backends: Backends) -> TestNode {
+        Self::start_with(cfg, Box::new(move || Box::pin(async move { backends })))
+    }
+
+    pub fn start_with(cfg: Config, factory: BackendsFactory) -> TestNode {
         let (tx, rx) = std::sync::mpsc::channel();
         let (stop_tx, stop_rx) = oneshot::channel::<Stop>();
         let thread = std::thread::spawn(move || {
@@ -63,6 +71,7 @@ impl TestNode {
                 .build()
                 .unwrap();
             let kill = rt.block_on(async move {
+                let backends = factory().await;
                 let server = Server::start(cfg, backends).await.expect("server starts");
                 tx.send((server.public_addr, server.internal_addr, server.manager.clone()))
                     .unwrap();

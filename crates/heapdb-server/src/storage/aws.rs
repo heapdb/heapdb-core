@@ -99,7 +99,15 @@ pub async fn ensure_resources(cfg: &Config) -> Result<(), String> {
             .bucket(&cfg.s3_bucket)
             .send()
             .await
-            .map_err(|e| format!("create bucket: {}", aws_sdk_s3::error::DisplayErrorContext(e)))?;
+            .map(|_| ())
+            .map_err(|e| format!("create bucket: {}", aws_sdk_s3::error::DisplayErrorContext(e)))
+            .or_else(|e| {
+                if e.contains("BucketAlready") {
+                    Ok(())
+                } else {
+                    Err(e)
+                }
+            })?;
     }
     let existing = ddb
         .list_tables()
@@ -142,12 +150,12 @@ pub async fn ensure_resources(cfg: &Config) -> Result<(), String> {
                 .attribute_definitions(attr(sk))
                 .key_schema(key(sk, KeyType::Range));
         }
-        req.send().await.map_err(|e| {
-            format!(
-                "create table {table}: {}",
-                aws_sdk_dynamodb::error::DisplayErrorContext(e)
-            )
-        })?;
+        if let Err(e) = req.send().await {
+            let msg = format!("{}", aws_sdk_dynamodb::error::DisplayErrorContext(e));
+            if !msg.contains("ResourceInUseException") {
+                return Err(format!("create table {table}: {msg}"));
+            }
+        }
     }
     Ok(())
 }
