@@ -4,6 +4,23 @@ All notable changes to `@heapdb/client` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the package uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - Unreleased
+
+The client's version now follows HeapDB's (0.6.0).
+
+### Added
+
+- **Keyed heaps** (`docs/heaps.md`): `heaps(target)` returns the same API for two
+  transports: a server connection (`connect(url)`, the new `/heaps` routes) or any
+  Postgres client with `query(text, params)` (node-postgres `Client` / `Pool`),
+  which calls the SQL functions of schema `heapdb` directly. Methods:
+  `createHeap`, `dropHeap`, `heap`, `listHeaps`, `push`, `pushMany` (atomic),
+  `setBase`, `setAttrs`, `remove`, `get`, `topK`, `pop`, `rebase`; typed results
+  `HeapInfo`, `HeapItem`, `Ranked` and typed `HeapFilter` trees.
+- `HEAPDB_SQL` / `HEAPDB_SQL_VERSION` (generated at build time from
+  `sql/postgres/heapdb.sql`) and `installHeapSql(client)`.
+- No new runtime dependencies (`pg` is a devDependency for the tests).
+
 ## [0.1.0] - Unreleased
 
 First preview of the TypeScript client for the HeapDB Data API.

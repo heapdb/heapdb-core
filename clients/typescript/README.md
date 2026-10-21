@@ -23,6 +23,39 @@ npm install @heapdb/client
 
 Deno: `import { connect } from "npm:@heapdb/client";`
 
+## Keyed heaps
+
+Named priority queues ordered by forward decay ([docs/heaps.md](../../docs/heaps.md)),
+on a HeapDB server or directly in Postgres, with the same API:
+
+```ts
+import pg from "pg";
+import { connect, heaps, installHeapSql } from "@heapdb/client";
+
+const onServer = heaps(connect(process.env.HEAPDB_URL!));
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+await installHeapSql(pool); // once: installs/upgrades schema `heapdb` (idempotent)
+const inPostgres = heaps(pool);
+
+for (const q of [onServer, inPostgres]) {
+  await q.createHeap("acme/checkout", 3 * 86400);
+  await q.push("acme/checkout", "CHK-12", 1.5, { attrs: { kind: "bug", required_skills: ["ts"] } });
+  await q.setBase("acme/checkout", "CHK-12", 4);
+  const next = await q.pop("acme/checkout", {
+    filter: { all: [
+      { attr: "required_skills", op: "subset_of", value: ["ts", "react"] },
+      { not: { attr: "labels", op: "contains", value: "needs-human" } },
+    ] },
+  });
+  console.log(next?.id, next?.score);
+}
+```
+
+`now` / `t` default to the server's (or the database's) clock. Over Postgres,
+concurrent `pop`s never return the same item, and the functions are `SECURITY
+INVOKER`, so row-level security on `heapdb.items` applies. `HEAPDB_SQL` is the SQL
+itself, for migrations tools.
+
 ## Connect
 
 Create a database and an API key in the console. It gives you a connection URL:

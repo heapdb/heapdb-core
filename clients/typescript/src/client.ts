@@ -71,6 +71,15 @@ function split<T extends RequestOptions>(o: T): RequestOptions {
   return r;
 }
 
+const transports = new WeakMap<HeapDB, Transport>();
+
+/** @internal The transport of a connection (for `heaps(db)`). */
+export function transportOf(db: HeapDB): Transport {
+  const t = transports.get(db);
+  if (!t) throw new HeapDBError({ code: "invalid_argument", message: "not a connected HeapDB" });
+  return t;
+}
+
 /**
  * A connection to one HeapDB database over the Data API.
  * Create with {@link connect}. Instances are stateless and safe to share.
@@ -111,6 +120,7 @@ export class HeapDB {
       userAgent: `heapdb-ts/${VERSION}${opts.userAgent ? ` ${opts.userAgent}` : ""}`,
       headers: opts.headers ?? {},
     });
+    transports.set(this, this.#http);
   }
 
   toString(): string {
