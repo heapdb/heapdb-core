@@ -170,7 +170,28 @@ async fn main() {
     cfg.admin_token = std::env::var("HEAPDB_ADMIN_TOKEN").ok().filter(|t| !t.is_empty());
     cfg.node_addr = match args.node_addr {
         Some(a) => Some(a),
-        None if cfg.cluster == ClusterMode::Aws => ecs_node_addr(cfg.internal_listen.port()).await,
+        None if cfg.cluster == ClusterMode::Aws => {
+            // Other nodes forward requests to this address, so a wrong value (the loopback
+            // default) would break forwarding silently. Retry briefly, then refuse to start.
+            let mut found = None;
+            for attempt in 0..5 {
+                found = ecs_node_addr(cfg.internal_listen.port()).await;
+                if found.is_some() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(500 << attempt)).await;
+            }
+            match found {
+                Some(a) => Some(a),
+                None => {
+                    eprintln!(
+                        "heapdb-server: cluster mode needs this node's private address: set \
+                         HEAPDB_NODE_ADDR (ip:port) or run on ECS with task metadata (v4) available"
+                    );
+                    std::process::exit(2);
+                }
+            }
+        }
         None => None,
     };
     if let Err(e) = cfg.apply_tuning_env() {
