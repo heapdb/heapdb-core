@@ -10,6 +10,10 @@ is written in Rust (crate ``heapdb``); this package is its Python binding.
     >>> _ = db.insert("me", 0, "meal", {"beans", "onion"}, weight=1.5)  # weight = dose
     >>> db.top_causes("me", "bloating", at=7200, k=1).top.event.features == {"beans", "onion"}
     True
+
+A database on a HeapDB server (hosted or self-hosted) has the same API:
+
+    >>> remote = heapdb.connect("heapdb://hdb_live_...@api.heapdb.com/db_...")  # doctest: +SKIP
 """
 
 from ._core import (
@@ -59,6 +63,8 @@ from ._core import (
     spearman,
 )
 
+from .remote import HeapDBError, RemoteHeapDB, connect  # noqa: E402
+
 __version__ = "0.5.0"
 
 __all__ = [
@@ -80,6 +86,7 @@ __all__ = [
     "ForwardDecayHeap",
     "GammaKernel",
     "HeapDB",
+    "HeapDBError",
     "JointCause",
     "Kernel",
     "LinkReport",
@@ -92,6 +99,7 @@ __all__ = [
     "QueryResult",
     "QueryStats",
     "RankedCandidate",
+    "RemoteHeapDB",
     "RiskResult",
     "Rule",
     "Segment",
@@ -100,6 +108,7 @@ __all__ = [
     "beta_interval",
     "beta_ppf",
     "betainc",
+    "connect",
     "execute",
     "format_result",
     "noisy_or",

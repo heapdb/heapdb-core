@@ -1,7 +1,11 @@
 name: ci
 
-# Rust: fmt, clippy (-D warnings), cargo test. Python: build the extension
-# with maturin and run the full pytest suite on several Python versions.
+# Rust: fmt, clippy (-D warnings, all features incl. the server's
+# cluster-aws), cargo test (engine, CLI, heapdb-server incl. its single-node,
+# crash-recovery, parity and in-memory cluster tests). Server emulator:
+# cluster tests against moto (S3 + DynamoDB). Python: build the extension
+# with maturin and run the full pytest suite on several Python versions
+# (on Linux also against a heapdb-server binary for heapdb.connect()).
 # Wheels: built for Linux / macOS / Windows (abi3, Python >= 3.10) on tags.
 
 on:
@@ -29,9 +33,30 @@ jobs:
       - name: cargo fmt
         run: cargo fmt --all --check
       - name: cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: cargo test
         run: cargo test --workspace
+
+  server-emulator:
+    # The cluster scenarios against an AWS emulator through the real SDK
+    # backends (they also run on in-memory fakes in the rust job).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: Swatinem/rust-cache@v2
+      - name: Start moto (S3 + DynamoDB emulator)
+        run: |
+          python -m pip install "moto[server,s3,dynamodb]"
+          moto_server -p 5000 > moto.log 2>&1 &
+          for i in $(seq 1 50); do curl -sf http://127.0.0.1:5000/ >/dev/null && break; sleep 0.2; done
+      - name: cluster tests (emulator)
+        env:
+          HEAPDB_TEST_AWS_ENDPOINT: http://127.0.0.1:5000
+        run: cargo test -p heapdb-server --features cluster-aws --test cluster
 
   python:
     runs-on: ${{ matrix.os }}
@@ -57,10 +82,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip maturin
           maturin build --release --out dist
+      - name: Build heapdb-server (remote client tests)
+        if: runner.os == 'Linux'
+        run: cargo build -p heapdb-server
       - name: Install wheel + test deps
         shell: bash
         run: |
-          python -m pip install dist/*.whl pytest -r benchmarks/requirements.txt
+          python -m pip install dist/*.whl pytest openapi-spec-validator -r benchmarks/requirements.txt
       - name: pytest
         shell: bash
         run: pytest -q -rs --junitxml=junit.xml

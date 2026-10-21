@@ -1,0 +1,44 @@
+[package]
+name = "heapdb-server"
+description = "HeapDB data plane: hosts many HeapDB databases behind an HTTP/JSON API (single node or clustered on AWS)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version = "1.88"
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "heapdb-server"
+path = "src/main.rs"
+
+[features]
+default = []
+# S3 + DynamoDB backends for clustered mode (HEAPDB_CLUSTER=aws).
+cluster-aws = ["dep:aws-config", "dep:aws-sdk-s3", "dep:aws-sdk-dynamodb"]
+
+[dependencies]
+heapdb.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+indexmap.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time", "fs", "io-util"] }
+tokio-util = "0.7"
+axum = "0.8"
+async-trait = "0.1"
+bytes = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter", "fmt"] }
+sha2 = "0.10"
+rand = "0.9"
+clap = { version = "4.5", features = ["derive", "env"] }
+reqwest = { version = "0.12", default-features = false }
+aws-config = { version = "1.8", optional = true, features = ["behavior-version-latest"] }
+aws-sdk-s3 = { version = "1.100", optional = true }
+aws-sdk-dynamodb = { version = "1.90", optional = true }
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tempfile = "3"

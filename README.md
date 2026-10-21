@@ -232,6 +232,45 @@ type's weight function, else 1.0. The REPL (`python -m heapdb`) also has meta co
 closures / trait objects), so you register them through the API, not the
 query language.
 
+## Hosted & self-hosted server
+
+The same databases can live on a HeapDB server: hosted at `api.heapdb.com`,
+or your own `heapdb-server` (single node on local disk, or a cluster on S3 +
+DynamoDB). `heapdb.connect()` returns a client with the `HeapDB` API:
+
+```python
+import heapdb
+from heapdb.remote import weight_attr, where
+
+db = heapdb.connect("heapdb://hdb_live_...@api.heapdb.com/db_7Kq2...")  # or set HEAPDB_URL
+db.register_effect("bloating", heapdb.LogNormalKernel(median=2 * 3600, sigma=0.6),
+                   priors={"beans": (3, 1)})
+db.register_event_type("meal", weight=weight_attr("portion", default=1.0))  # declarative, no code upload
+db.add_rule("bloating", "tiny portion", where("portion", "<", 0.3), 0.5)
+db.insert("me", t, "meal", {"beans", "onion"}, attrs={"portion": 1.5}, external_id="meal-42")
+db.insert_many(events)                                  # batched, 1000 per request
+for c in db.top_causes("me", "bloating", at=now, k=3, explain=True):
+    print(c.rank, c.event.short(), c.score, c.explanation)
+```
+
+Results have the same attributes as the local ones. Errors are
+`heapdb.HeapDBError` subclasses with a `.code`; rate limits and transient
+`503`s are retried honouring `Retry-After`, quota errors are not. The client is
+pure standard library (no extra dependencies).
+
+Self-host a node (Docker, or `cargo build --release -p heapdb-server`):
+
+```sh
+docker run -d -p 8080:8080 -v heapdb-data:/data -e HEAPDB_ADMIN_TOKEN=change-me \
+  ghcr.io/heapdb/heapdb-server:latest
+```
+
+then create a database and an API key with the Admin API and connect with
+`heapdb+http://<api_key>@localhost:8080/<database_id>` (or put TLS in front
+and use `heapdb://`). The API reference, architecture (leases, forwarding,
+group-committed WAL, snapshots, fencing), quotas and configuration are in
+[docs/server.md](docs/server.md).
+
 ## Architecture
 
 A Cargo workspace (the engine and the CLI are pure Rust) plus a maturin
@@ -257,10 +296,13 @@ crates/heapdb/               the engine (Rust library, no Python dependency)
   src/pyfmt.rs               Python-compatible number formatting for the text output
   tests/                     property tests (proptest), behaviour tests, snapshot fixtures
 crates/heapdb-cli/           `heapdb` binary: REPL and query-file runner
+crates/heapdb-server/        `heapdb-server`: HTTP Data/Admin API, WAL + snapshots, leases,
+                             single node (local disk) or cluster (S3 + DynamoDB); docs/server.md
 bindings/python/
   src/                       PyO3 extension `heapdb._core` (abi3, CPython >= 3.10)
   python/heapdb/             thin package: re-exports (heapdb.store, .links, .query, ...),
-                             `_core.pyi` type stubs, `py.typed`, CLI terminal I/O
+                             `_core.pyi` type stubs, `py.typed`, CLI terminal I/O,
+                             `remote.py`: `heapdb.connect()` client for heapdb-server
 tests/, examples/, benchmarks/   Python test suite, examples and benchmarks (use the package)
 ```
 
@@ -612,6 +654,23 @@ Design direction (**not implemented** beyond `forget_entity`):
   the global-layer updates contributed by each entity (and bound each
   entity's contribution), so the population prior cannot be used to infer
   any one entity's history.
+
+## Changelog: Unreleased (0.6.0)
+
+- **`heapdb.connect()`**: a client for HeapDB servers in the `heapdb`
+  package (`heapdb/remote.py`, pure standard library). Parses
+  `heapdb://<api_key>@<host>/<database_id>` (or `HEAPDB_URL`) and returns a
+  `RemoteHeapDB` mirroring `HeapDB`: `register_effect`, declarative
+  `register_event_type` / `add_rule` (`weight_attr`, `weight_log1p`,
+  `weight_const`, `where`), `insert` / batched `insert_many` with
+  `external_id` idempotency, `top_causes(_group)`, `feature_risk`,
+  `rank_candidates`, `feedback`, `observe`, `settle`, `link_report`,
+  `calibration_report`, `forget_entity`, `execute`. Retries with backoff
+  honouring `Retry-After`; `HeapDBError` subclasses with codes.
+- **`heapdb-server`** (`crates/heapdb-server`): the data plane behind
+  `api.heapdb.com`, also self-hostable (binary or
+  `ghcr.io/heapdb/heapdb-server`). See [docs/server.md](docs/server.md).
+- The Python package version stays 0.5.0 until the 0.6.0 release.
 
 ## Changelog: v0.5
 
