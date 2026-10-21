@@ -1,0 +1,105 @@
+name: clients-ts
+
+# TypeScript client (@heapdb/client, clients/typescript): typecheck, lint, test and
+# build on Node 20 and 22. Tags `ts-vX.Y.Z` publish to npm with provenance.
+#
+# Publishing setup (repository owner, once):
+#   1. Create the `heapdb` organization on npmjs.com (owns the `@heapdb` scope).
+#   2. Either configure npm trusted publishing for @heapdb/client (package settings ->
+#      Trusted publisher: GitHub Actions, repo heapdb/heapdb-core, workflow
+#      clients-ts.yml, environment npm) -- preferred, no secret needed -- or create a
+#      granular automation token with publish rights on @heapdb and store it as the
+#      `NPM_TOKEN` repository secret. (The first publish of a new package may need the
+#      token; trusted publishing can be configured once the package exists.)
+#   3. Create the `npm` environment in the repository settings (optionally with
+#      required reviewers).
+# Release: bump clients/typescript/package.json + CHANGELOG, then push tag ts-vX.Y.Z.
+
+on:
+  push:
+    branches: [main]
+    tags: ["ts-v*"]
+    paths:
+      - "clients/typescript/**"
+      - ".github/workflows/clients-ts.yml"
+  pull_request:
+    paths:
+      - "clients/typescript/**"
+      - ".github/workflows/clients-ts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: clients/typescript
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: clients/typescript/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Package contents
+        run: |
+          npm pack --dry-run --json > "$RUNNER_TEMP/pack.json"
+          node -e '
+            const files = require(process.env.RUNNER_TEMP + "/pack.json")[0].files.map(f => f.path).sort();
+            console.log(files.join("\n"));
+            const bad = files.filter(f => !/^(dist\/|README\.md$|LICENSE$|package\.json$)/.test(f));
+            if (bad.length) { console.error("unexpected files in package:", bad); process.exit(1); }
+          '
+      - name: Smoke test built package (ESM + CJS)
+        run: |
+          node --input-type=module -e 'import { connect } from "./dist/index.js"; const db = connect("heapdb://hdb_live_x@api.example.com/db_1"); if (String(db).includes("hdb_live_x")) process.exit(1);'
+          node -e 'const { connect } = require("./dist/index.cjs"); connect("heapdb://hdb_live_x@api.example.com/db_1");'
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/ts-v')
+    needs: check
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write # npm provenance + trusted publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - name: Use npm >= 11.5 (trusted publishing)
+        run: npm install -g npm@11
+      - name: Tag matches package version
+        run: |
+          tag="${GITHUB_REF_NAME#ts-v}"
+          version="$(node -p 'require("./package.json").version')"
+          if [ "$tag" != "$version" ]; then
+            echo "tag ts-v$tag does not match package.json version $version" >&2
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm run build
+      - name: Publish
+        run: npm publish --provenance --access public
+        env:
+          # Empty when using trusted publishing; npm then authenticates via OIDC.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
