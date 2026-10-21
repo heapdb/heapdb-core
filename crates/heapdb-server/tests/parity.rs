@@ -77,7 +77,11 @@ async fn http_matches_in_process_engine() {
     for i in 0..600 {
         let ent = format!("u{}", rng.next() % 5);
         let t = i as f64 * 300.0 + rng.unit() * 200.0;
-        let ty = if rng.next() % 4 == 0 { "snack" } else { "meal" };
+        let ty = if rng.next().is_multiple_of(4) {
+            "snack"
+        } else {
+            "meal"
+        };
         let mut fs: Vec<String> = (0..1 + rng.next() % 3)
             .map(|_| feats[(rng.next() % 7) as usize].to_string())
             .collect();

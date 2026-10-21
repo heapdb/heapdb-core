@@ -69,6 +69,12 @@ enum Cmd {
     Keygen,
     /// Print a new database id.
     NewId,
+    /// Exit 0 if `GET <url>/healthz` answers 200 (container HEALTHCHECK).
+    Healthcheck {
+        /// Base URL of the public listener.
+        #[arg(long, default_value = "http://127.0.0.1:8080")]
+        url: String,
+    },
     /// Create the S3 bucket and DynamoDB tables if missing (cluster mode).
     #[cfg(feature = "cluster-aws")]
     AwsInit,
@@ -135,6 +141,18 @@ async fn main() {
         Some(Cmd::NewId) => {
             println!("{}", new_database_id());
             return;
+        }
+        Some(Cmd::Healthcheck { url }) => {
+            let ok = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(3))
+                .build()
+                .ok()
+                .map(|c| c.get(format!("{}/healthz", url.trim_end_matches('/'))).send());
+            let ok = match ok {
+                Some(f) => f.await.is_ok_and(|r| r.status().is_success()),
+                None => false,
+            };
+            std::process::exit(if ok { 0 } else { 1 });
         }
         _ => {}
     }

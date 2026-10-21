@@ -1,0 +1,7 @@
+target/
+.git/
+**/__pycache__/
+.venv/
+venv/
+dist/
+benchmarks/results/

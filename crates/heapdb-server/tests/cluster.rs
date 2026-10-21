@@ -27,7 +27,7 @@ use serde_json::{json, Value};
 enum Env {
     Fake(Backends),
     #[cfg(feature = "cluster-aws")]
-    Aws(Config),
+    Aws(Box<Config>),
 }
 
 impl Env {
@@ -60,7 +60,7 @@ impl Env {
         heapdb_server::storage::aws::ensure_resources(&c)
             .await
             .expect("emulator reachable");
-        Some(Env::Aws(c))
+        Some(Env::Aws(Box::new(c)))
     }
 
     fn config(&self, dir: &std::path::Path) -> Config {
