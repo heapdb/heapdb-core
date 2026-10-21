@@ -65,6 +65,30 @@ impl<'de> Deserialize<'de> for Num {
     }
 }
 
+/// `(kind, result)` of a heap statement: `heap_items` (`{heap, now,
+/// popped, items: [Ranked]}`), `heap` (HeapInfo), `heaps` (`{heaps:
+/// [HeapInfo]}`) or `message`.
+pub fn heap_output(h: &heapdb::heaps::hql::HeapOutput) -> (&'static str, Value) {
+    use heapdb::heaps::hql::HeapOutput as H;
+    match h {
+        H::Top(t) => (
+            "heap_items",
+            json!({
+                "heap": t.heap,
+                "now": num(t.now),
+                "popped": t.popped,
+                "items": t.items.iter().map(heapdb::Ranked::to_json).collect::<Vec<_>>(),
+            }),
+        ),
+        H::Info(i) => ("heap", i.to_json()),
+        H::List(v) => (
+            "heaps",
+            json!({"heaps": v.iter().map(heapdb::HeapInfo::to_json).collect::<Vec<_>>()}),
+        ),
+        H::Message(m) => ("message", Value::from(m.clone())),
+    }
+}
+
 /// An event: `{id, entity, time, type, features, weight, attrs}`.
 pub fn event(e: &Event) -> Value {
     json!({
@@ -303,6 +327,7 @@ pub fn output(o: &Output) -> Value {
         Output::Observe(r) => ("observe", observe(r)),
         Output::Settle(r) => ("settle", settle(r)),
         Output::Message(m) => ("message", Value::from(m.clone())),
+        Output::Heap(h) => heap_output(h),
     };
     json!({"kind": kind, "result": result, "text": o.to_string()})
 }

@@ -40,6 +40,7 @@
 pub mod error;
 pub mod event;
 pub mod forward_decay;
+pub mod heaps;
 pub mod intern;
 pub mod kernels;
 pub mod links;
@@ -57,6 +58,9 @@ pub mod store;
 pub use error::{BoxError, Error, ErrorKind, Result};
 pub use event::{Attrs, Event, EventRef, Features};
 pub use forward_decay::{ForwardDecayHeap, Popped};
+pub use heaps::{
+    Filter, HeapBackend, HeapInfo, HeapItem, HeapOp, HeapSpec, MemoryHeaps, NativeHeaps, PersistTo, Ranked,
+};
 pub use kernels::{Kernel, KernelShape};
 pub use links::{noisy_or, responsibilities, BetaCounts, Credit, EntityRef, LinkTable};
 pub use observe::{Baseline, LinkReportOptions};

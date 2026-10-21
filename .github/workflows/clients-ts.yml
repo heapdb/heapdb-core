@@ -21,10 +21,12 @@ on:
     tags: ["ts-v*"]
     paths:
       - "clients/typescript/**"
+      - "sql/postgres/**"
       - ".github/workflows/clients-ts.yml"
   pull_request:
     paths:
       - "clients/typescript/**"
+      - "sql/postgres/**"
       - ".github/workflows/clients-ts.yml"
   workflow_dispatch:
 
@@ -38,6 +40,16 @@ defaults:
 jobs:
   check:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 2s --health-timeout 5s --health-retries 20
+    env:
+      HEAPDB_TEST_POSTGRES_URL: postgres://postgres:postgres@localhost:5432/postgres
     strategy:
       fail-fast: false
       matrix:
@@ -50,7 +62,7 @@ jobs:
           cache: npm
           cache-dependency-path: clients/typescript/package-lock.json
       - run: npm ci
-      - name: Typecheck
+      - name: Typecheck (and src/sql.generated.ts matches sql/postgres/heapdb.sql)
         run: npm run typecheck
       - name: Lint
         run: npm run lint

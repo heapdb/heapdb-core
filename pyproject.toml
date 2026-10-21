@@ -6,7 +6,7 @@ build-backend = "maturin"
 
 [project]
 name = "heapdb"
-version = "0.6.0"
+version = "0.7.0"
 description = "HeapDB: pop the most likely cause, right now. Ranked, explainable attribution over an append-only event stream (Rust engine, Python bindings)."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -32,7 +32,8 @@ heapdb = "heapdb.cli:main"
 manifest-path = "bindings/python/Cargo.toml"
 python-source = "bindings/python/python"
 module-name = "heapdb._core"
-features = []
+# The release wheels include the Postgres backend (Heaps(persist_to="postgres://...")).
+features = ["postgres"]
 include = [{ path = "LICENSE", format = "sdist" }]
 
 [tool.pytest.ini_options]

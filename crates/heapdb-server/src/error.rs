@@ -108,9 +108,11 @@ impl From<heapdb::Error> for ApiError {
         match &e {
             E::UnknownEffect(_) => Self::new(StatusCode::NOT_FOUND, "unknown_effect", e.to_string()),
             E::UnknownEvent(_) => Self::new(StatusCode::NOT_FOUND, "unknown_event", e.to_string()),
+            E::UnknownHeap(_) => Self::new(StatusCode::NOT_FOUND, "unknown_heap", e.to_string()),
+            E::HeapConflict(_) => Self::new(StatusCode::CONFLICT, "heap_conflict", e.to_string()),
             E::Query(_) => Self::new(StatusCode::BAD_REQUEST, "query_error", e.to_string()),
             E::Invalid(_) | E::Type(_) | E::MissingArgument | E::Callback(_) => Self::invalid(e.to_string()),
-            E::Snapshot(_) | E::Io(_) => Self::internal(e.to_string()),
+            E::Snapshot(_) | E::Io(_) | E::Backend(_) => Self::internal(e.to_string()),
         }
     }
 }

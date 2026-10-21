@@ -40,6 +40,15 @@ pub enum Error {
     /// A rule predicate or weight function failed.
     #[error("{0}")]
     Callback(BoxError),
+    /// A keyed heap that does not exist (see [`crate::heaps`]).
+    #[error("unknown heap {}; call create_heap first", crate::pyfmt::repr_str(.0))]
+    UnknownHeap(String),
+    /// `create_heap` with a spec that differs from the existing heap's.
+    #[error("{0}")]
+    HeapConflict(String),
+    /// A heap storage backend failed (I/O, a database connection, ...).
+    #[error("{0}")]
+    Backend(String),
 }
 
 /// Coarse classification of an [`Error`], mirroring Python exception types.
@@ -75,12 +84,12 @@ impl Error {
     /// The Python exception type this error corresponds to.
     pub fn kind(&self) -> ErrorKind {
         match self {
-            Error::UnknownEffect(_) | Error::UnknownEvent(_) => ErrorKind::Key,
-            Error::Invalid(_) | Error::Snapshot(_) => ErrorKind::Value,
+            Error::UnknownEffect(_) | Error::UnknownEvent(_) | Error::UnknownHeap(_) => ErrorKind::Key,
+            Error::Invalid(_) | Error::Snapshot(_) | Error::HeapConflict(_) => ErrorKind::Value,
             Error::Type(_) => ErrorKind::Type,
             Error::Query(_) => ErrorKind::Query,
             Error::MissingArgument => ErrorKind::Index,
-            Error::Io(_) => ErrorKind::Io,
+            Error::Io(_) | Error::Backend(_) => ErrorKind::Io,
             Error::Callback(_) => ErrorKind::Callback,
         }
     }

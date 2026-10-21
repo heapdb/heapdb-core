@@ -288,6 +288,46 @@ fn schemas() -> Value {
         ),
     );
     put("Ok", obj(json!({"ok": {"type": "boolean"}}), &["ok"]));
+    put(
+        "HeapInfo",
+        obj(
+            json!({
+                "name": {"type": "string"}, "half_life": {"type": "number"}, "landmark": {"type": "number"},
+                "meta": {"type": "object"}, "size": {"type": "integer"}
+            }),
+            &["name", "half_life", "landmark", "meta", "size"],
+        ),
+    );
+    put(
+        "HeapItem",
+        obj(
+            json!({
+                "id": {"type": "string"}, "base": {"type": "number"},
+                "activity": nullable(json!({"type": "number"})), "key": nullable(json!({"type": "number"})),
+                "attrs": {"type": "object"}, "version": {"type": "integer"}
+            }),
+            &["id", "base", "activity", "key", "attrs", "version"],
+        ),
+    );
+    put(
+        "Ranked",
+        obj(
+            json!({
+                "rank": {"type": "integer"}, "id": {"type": "string"},
+                "key": nullable(json!({"type": "number"})), "score": num(), "heat": num(),
+                "base": {"type": "number"}, "attrs": {"type": "object"}, "version": {"type": "integer"}
+            }),
+            &["rank", "id", "key", "score", "heat", "base", "attrs", "version"],
+        ),
+    );
+    put(
+        "HeapFilter",
+        json!({
+            "description": "{\"all\": [...]}, {\"any\": [...]}, {\"not\": filter} or a leaf {attr, op, value}; ops: eq, ne, lt, lte, gt, gte, in, not_in, contains, contains_all, subset_of, exists, missing (docs/heaps.md)",
+            "type": "object"
+        }),
+    );
+    put("HeapItems", obj(json!({"items": arr(r("HeapItem"))}), &["items"]));
     Value::Object(s)
 }
 
@@ -536,19 +576,174 @@ pub fn document() -> Value {
             ]),
         ),
     );
+    let heap_p = || json!({"name": "heap", "in": "path", "required": true, "description": "percent-encoded heap name", "schema": {"type": "string"}});
+    let item_p = || json!({"name": "item", "in": "path", "required": true, "description": "percent-encoded item id", "schema": {"type": "string"}});
+    let batch = |item: Value| {
+        obj(
+            json!({"items": {"type": "array", "minItems": 1, "maxItems": 1000, "items": item}}),
+            &["items"],
+        )
+    };
+    add(
+        "/heaps",
+        "get",
+        op(
+            "List keyed heaps",
+            "read",
+            None,
+            obj(json!({"heaps": arr(r("HeapInfo"))}), &["heaps"]),
+            none.clone(),
+        ),
+    );
+    add(
+        "/heaps/{heap}",
+        "put",
+        op(
+            "create_heap (idempotent when the spec matches; 409 heap_conflict otherwise)",
+            "admin",
+            Some(obj(
+                json!({"half_life": {"type": "number", "exclusiveMinimum": 0}, "landmark": {"type": "number"}, "meta": {"type": "object"}}),
+                &["half_life"],
+            )),
+            r("HeapInfo"),
+            json!([heap_p()]),
+        ),
+    );
+    add(
+        "/heaps/{heap}",
+        "get",
+        op("One heap", "read", None, r("HeapInfo"), json!([heap_p()])),
+    );
+    add(
+        "/heaps/{heap}",
+        "delete",
+        op(
+            "drop_heap",
+            "admin",
+            None,
+            obj(json!({"dropped": {"type": "boolean"}}), &["dropped"]),
+            json!([heap_p()]),
+        ),
+    );
+    add(
+        "/heaps/{heap}/push",
+        "post",
+        op(
+            "push (batched, at most 1000, atomic)",
+            "write",
+            Some(batch(obj(
+                json!({"id": {"type": "string"}, "weight": {"type": "number", "exclusiveMinimum": 0}, "time": {"type": "number"}, "attrs": {"type": "object"}}),
+                &["id"],
+            ))),
+            r("HeapItems"),
+            json!([heap_p()]),
+        ),
+    );
+    add(
+        "/heaps/{heap}/base",
+        "post",
+        op(
+            "set_base (batched, atomic)",
+            "write",
+            Some(batch(obj(
+                json!({"id": {"type": "string"}, "base": {"type": "number", "exclusiveMinimum": 0}}),
+                &["id", "base"],
+            ))),
+            r("HeapItems"),
+            json!([heap_p()]),
+        ),
+    );
+    add(
+        "/heaps/{heap}/attrs",
+        "post",
+        op(
+            "set_attrs (batched, atomic; merge = shallow merge)",
+            "write",
+            Some(batch(obj(
+                json!({"id": {"type": "string"}, "attrs": {"type": "object"}, "merge": {"type": "boolean"}}),
+                &["id", "attrs"],
+            ))),
+            r("HeapItems"),
+            json!([heap_p()]),
+        ),
+    );
+    add(
+        "/heaps/{heap}/top",
+        "post",
+        op(
+            "top_k",
+            "read",
+            Some(obj(
+                json!({"k": {"type": "integer", "minimum": 0}, "now": {"type": "number"}, "filter": r("HeapFilter")}),
+                &[],
+            )),
+            obj(json!({"items": arr(r("Ranked"))}), &["items"]),
+            json!([heap_p()]),
+        ),
+    );
+    add(
+        "/heaps/{heap}/pop",
+        "post",
+        op(
+            "pop (top_k(1) and remove, atomically)",
+            "write",
+            Some(obj(
+                json!({"now": {"type": "number"}, "filter": r("HeapFilter")}),
+                &[],
+            )),
+            obj(json!({"item": nullable(r("Ranked"))}), &["item"]),
+            json!([heap_p()]),
+        ),
+    );
+    add(
+        "/heaps/{heap}/rebase",
+        "post",
+        op(
+            "rebase (move the landmark, keep current heat)",
+            "admin",
+            Some(obj(
+                json!({"now": {"type": "number"}, "half_life": {"type": "number", "exclusiveMinimum": 0}}),
+                &[],
+            )),
+            r("HeapInfo"),
+            json!([heap_p()]),
+        ),
+    );
+    add(
+        "/heaps/{heap}/items/{item}",
+        "get",
+        op(
+            "get (score and heat at now)",
+            "read",
+            None,
+            r("Ranked"),
+            json!([heap_p(), item_p(), qp("now", "number", false)]),
+        ),
+    );
+    add(
+        "/heaps/{heap}/items/{item}",
+        "delete",
+        op(
+            "remove",
+            "write",
+            None,
+            obj(json!({"removed": {"type": "boolean"}}), &["removed"]),
+            json!([heap_p(), item_p()]),
+        ),
+    );
     add(
         "/hql",
         "post",
         op(
             "Run one query-language statement",
-            "read (TOP, RISK, LINKS, CALIBRATION) or write (INSERT, FEEDBACK, OBSERVE, SETTLE)",
+            "read (TOP, RISK, LINKS, CALIBRATION, PEEK, SHOW HEAPS), write (INSERT, FEEDBACK, OBSERVE, SETTLE, PUSH, SET, POP, REMOVE) or admin (CREATE HEAP, DROP HEAP, REBASE)",
             Some(obj(
                 json!({"query": {"type": "string"}, "now": {"type": "number"}}),
                 &["query"],
             )),
             obj(
                 json!({
-                    "kind": {"type": "string", "enum": ["top_causes", "calibration", "risk", "links", "observe", "settle", "message"]},
+                    "kind": {"type": "string", "enum": ["top_causes", "calibration", "risk", "links", "observe", "settle", "message", "heap_items", "heap", "heaps"]},
                     "result": {}, "text": {"type": "string"}
                 }),
                 &["kind", "result", "text"],

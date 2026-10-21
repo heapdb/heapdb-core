@@ -1,17 +1,18 @@
 [workspace]
 resolver = "2"
-members = ["crates/heapdb", "crates/heapdb-cli", "crates/heapdb-server", "bindings/python"]
-default-members = ["crates/heapdb", "crates/heapdb-cli", "crates/heapdb-server"]
+members = ["crates/heapdb", "crates/heapdb-cli", "crates/heapdb-server", "crates/heapdb-postgres", "bindings/python"]
+default-members = ["crates/heapdb", "crates/heapdb-cli", "crates/heapdb-server", "crates/heapdb-postgres"]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 license = "Apache-2.0"
 rust-version = "1.82"
 repository = "https://github.com/heapdb/heapdb-core"
 
 [workspace.dependencies]
-heapdb = { path = "crates/heapdb", version = "0.6.0" }
+heapdb = { path = "crates/heapdb", version = "0.7.0" }
+heapdb-postgres = { path = "crates/heapdb-postgres", version = "0.7.0" }
 thiserror = "2.0.21"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.145", features = ["preserve_order", "float_roundtrip"] }

@@ -12,7 +12,7 @@ import sys
 import time
 from typing import Callable, TextIO
 
-from ._core import HELP, HeapDB, QueryError, handle_line, load_demo
+from ._core import HELP, HeapDB, Heaps, QueryError, handle_line, load_demo
 
 __all__ = ["HELP", "handle_line", "load_demo", "main", "repl"]
 
@@ -20,7 +20,7 @@ _ERRORS = (QueryError, KeyError, ValueError, IndexError, OSError)
 
 
 def repl(db: HeapDB, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout,
-         clock: Callable[[], float] = time.time) -> None:
+         clock: Callable[[], float] = time.time, heaps: Heaps | None = None) -> None:
     interactive = stdin.isatty()
     if interactive:
         print("HeapDB REPL. Type .help for commands, .quit to exit.", file=stdout)
@@ -32,7 +32,7 @@ def repl(db: HeapDB, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout,
         if not line:
             break
         try:
-            db, out = handle_line(db, line, clock)
+            db, out = handle_line(db, line, clock, heaps)
         except EOFError:
             break
         except _ERRORS as e:
@@ -42,14 +42,14 @@ def repl(db: HeapDB, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout,
 
 
 def run_files(db: HeapDB, paths: list[str], stdout: TextIO = sys.stdout,
-              clock: Callable[[], float] = time.time) -> int:
+              clock: Callable[[], float] = time.time, heaps: Heaps | None = None) -> int:
     """Execute query files line by line; returns the number of failed lines."""
     failed = 0
     for path in paths:
         with open(path, encoding="utf-8") as fh:
             for line in fh:
                 try:
-                    db, out = handle_line(db, line, clock)
+                    db, out = handle_line(db, line, clock, heaps)
                 except EOFError:
                     return failed
                 except _ERRORS as e:
@@ -65,14 +65,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--load", help="JSONL snapshot to load at start")
     ap.add_argument("--demo", action="store_true", help="preload a small bloating demo")
     ap.add_argument("--bucket", type=float, default=900.0, help="bucket width in seconds")
+    ap.add_argument("--heaps", default="memory",
+                    help="where heap statements (CREATE HEAP, PUSH, PEEK, ...) keep their heaps: "
+                         "memory (default), native:<dir> or postgres://...")
     ap.add_argument("files", nargs="*", help="query files to execute (then exit)")
     ns = ap.parse_args(argv)
     db = HeapDB.load(ns.load) if ns.load else HeapDB(bucket_seconds=ns.bucket)
     if ns.demo:
         load_demo(db, time.time())
+    heaps = Heaps(ns.heaps)
     if ns.files:
-        return 1 if run_files(db, ns.files) else 0
-    repl(db)
+        return 1 if run_files(db, ns.files, heaps=heaps) else 0
+    repl(db, heaps=heaps)
     return 0
 
 

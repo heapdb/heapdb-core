@@ -1,7 +1,7 @@
 {
   "name": "@heapdb/client",
-  "version": "0.1.0",
-  "description": "TypeScript client for the HeapDB Data API (hosted HeapDB Cloud or self-hosted heapdb-server).",
+  "version": "0.7.0",
+  "description": "TypeScript client for HeapDB: the Data API (hosted HeapDB Cloud or self-hosted heapdb-server) and keyed heaps on a server or directly in Postgres.",
   "license": "Apache-2.0",
   "author": "HeapDB",
   "homepage": "https://github.com/heapdb/heapdb-core/tree/main/clients/typescript#readme",
@@ -46,17 +46,20 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "tsup",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "build": "npm run gen && tsup",
+    "typecheck": "node scripts/gen-sql.mjs --check && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "lint": "biome check .",
     "format": "biome check --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm run typecheck && npm run lint && npm test && npm run build"
+    "prepublishOnly": "npm run typecheck && npm run lint && npm test && npm run build",
+    "gen": "node scripts/gen-sql.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
     "@types/node": "20.19.43",
+    "@types/pg": "8.15.5",
+    "pg": "8.16.3",
     "tsup": "8.5.1",
     "typescript": "5.9.3",
     "vitest": "4.1.11"

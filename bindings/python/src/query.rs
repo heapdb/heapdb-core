@@ -582,6 +582,12 @@ fn stmt_to_py(py: Python<'_>, s: Statement) -> PyResult<Py<PyAny>> {
         Statement::Observe(inner) => Py::new(py, PyObserveStmt { inner })?.into_any(),
         Statement::Settle(inner) => Py::new(py, PySettleStmt { inner })?.into_any(),
         Statement::Links(inner) => Py::new(py, PyLinksQuery { inner })?.into_any(),
+        // Heap statements have no AST class; they stay text.
+        Statement::Heap(_) => {
+            return Err(crate::conv::QueryError::new_err(
+                "heap statements (CREATE HEAP, PUSH, PEEK, ...) run on heapdb.Heaps: use Heaps.execute(...)",
+            ))
+        }
     })
 }
 
@@ -619,6 +625,7 @@ fn output_to_py(py: Python<'_>, out: Output) -> PyResult<Py<PyAny>> {
         Output::Observe(inner) => Py::new(py, PyObserveReport { inner })?.into_any(),
         Output::Settle(inner) => Py::new(py, PySettleReport { inner })?.into_any(),
         Output::Message(m) => m.into_pyobject(py)?.into_any().unbind(),
+        Output::Heap(h) => crate::heaps::heap_output_to_py(py, h)?,
     })
 }
 
@@ -678,12 +685,15 @@ pub fn parse_time(text: &str) -> PyResult<PyTimeExpr> {
 }
 
 /// Process one REPL line. Returns the (possibly replaced) db and output.
+/// Heap statements run against ``heaps`` (a ``heapdb.Heaps``) when given.
 #[pyfunction]
+#[pyo3(signature = (db, line, clock, heaps = None))]
 pub fn handle_line(
     py: Python<'_>,
     db: Py<PyHeapDB>,
     line: &str,
     clock: &Bound<'_, PyAny>,
+    heaps: Option<&Bound<'_, crate::heaps::PyHeaps>>,
 ) -> PyResult<(Py<PyHeapDB>, Option<String>)> {
     let mut clock_fn = || -> heapdb::Result<f64> {
         clock
@@ -693,7 +703,12 @@ pub fn handle_line(
     };
     let outcome = {
         let mut b = db.bind(py).borrow_mut();
-        heapdb::repl::handle_line(&mut b.db, line, &mut clock_fn).map_err(err)?
+        match heaps {
+            Some(h) => h
+                .borrow_mut()
+                .with_backend(|hb| heapdb::repl::handle_line_with(&mut b.db, hb, line, &mut clock_fn))?,
+            None => heapdb::repl::handle_line(&mut b.db, line, &mut clock_fn).map_err(err)?,
+        }
     };
     match outcome {
         heapdb::repl::Outcome::Quit => Err(PyEOFError::new_err(())),

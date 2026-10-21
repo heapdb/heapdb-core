@@ -17,6 +17,10 @@
 //! LINKS OF <effect> [FOR <entity>] [MIN <n>]
 //! ```
 //!
+//! Heap statements (`CREATE HEAP`, `PUSH`, `PEEK`, `POP`, ...) are parsed by
+//! [`crate::heaps::hql`] and run against a [`HeapBackend`] with
+//! [`execute_with`].
+//!
 //! `<time>` is a number of seconds, `now`, `now-<duration>` or an ISO-8601
 //! datetime; `<duration>` is a number with an optional unit `s`, `m`, `h`,
 //! `d`. Statements are tokenised like Python's `shlex.split` (quotes work).
@@ -28,6 +32,8 @@ use serde_json::Value;
 
 use crate::error::{Error, Result};
 use crate::event::Attrs;
+use crate::heaps::hql::{self, HeapOutput, HeapStmt};
+use crate::heaps::HeapBackend;
 use crate::observe::LinkReportOptions;
 use crate::pyfmt::repr_str;
 use crate::results::{CalibrationReport, LinkReport, ObserveReport, QueryResult, RiskResult, SettleReport};
@@ -198,6 +204,8 @@ pub enum Statement {
     Settle(SettleStmt),
     /// `LINKS`
     Links(LinksQuery),
+    /// A heap statement (`CREATE HEAP`, `PUSH`, `PEEK`, `POP`, ...).
+    Heap(HeapStmt),
 }
 
 /// The result of executing a statement.
@@ -217,6 +225,8 @@ pub enum Output {
     Settle(SettleReport),
     /// `FEEDBACK` / `INSERT`: a message.
     Message(String),
+    /// A heap statement.
+    Heap(HeapOutput),
 }
 
 impl fmt::Display for Output {
@@ -229,6 +239,7 @@ impl fmt::Display for Output {
             Output::Observe(r) => r.fmt(f),
             Output::Settle(r) => r.fmt(f),
             Output::Message(m) => f.write_str(m),
+            Output::Heap(h) => h.fmt(f),
         }
     }
 }
@@ -590,6 +601,9 @@ fn number_tok(tok: &str, what: &str) -> Result<f64> {
 
 /// Parse one statement.
 pub fn parse(text: &str) -> Result<Statement> {
+    if hql::is_heap_statement(text) {
+        return Ok(Statement::Heap(hql::parse(text)?));
+    }
     let mut ts = Tokens::new(text)?;
     let head = ts.next("a statement")?.to_uppercase();
     let stmt = match head.as_str() {
@@ -603,7 +617,7 @@ pub fn parse(text: &str) -> Result<Statement> {
         "LINKS" => Statement::Links(parse_links(&mut ts)?),
         _ => {
             return Err(Error::query(format!(
-                "unknown statement {} (expected TOP, RISK, FEEDBACK, INSERT, CALIBRATION, OBSERVE, SETTLE or LINKS)",
+                "unknown statement {} (expected TOP, RISK, FEEDBACK, INSERT, CALIBRATION, OBSERVE, SETTLE, LINKS, or a heap statement: CREATE HEAP, PUSH, SET BASE, SET ATTRS, PEEK, POP, REMOVE, REBASE, DROP HEAP, SHOW HEAPS)",
                 repr_str(&head)
             )))
         }
@@ -857,9 +871,37 @@ fn attrs_of(pairs: &AttrPairs) -> Attrs {
     m
 }
 
-/// Run a statement. `now` resolves `now` / `now-<d>` times.
+/// Run a statement. `now` resolves `now` / `now-<d>` times. Heap
+/// statements need a heap backend: use [`execute_with`].
 pub fn execute(db: &mut HeapDB, stmt: &Statement, now: f64) -> Result<Output> {
+    execute_inner(db, None, stmt, now)
+}
+
+/// [`execute`], running heap statements against `heaps`.
+pub fn execute_with(
+    db: &mut HeapDB,
+    heaps: &mut dyn HeapBackend,
+    stmt: &Statement,
+    now: f64,
+) -> Result<Output> {
+    execute_inner(db, Some(heaps), stmt, now)
+}
+
+fn execute_inner(
+    db: &mut HeapDB,
+    heaps: Option<&mut dyn HeapBackend>,
+    stmt: &Statement,
+    now: f64,
+) -> Result<Output> {
     Ok(match stmt {
+        Statement::Heap(h) => match heaps {
+            Some(backend) => Output::Heap(hql::execute(backend, h, now)?),
+            None => {
+                return Err(Error::query(
+                    "heap statements need a heap backend (heapdb::query::execute_with, or heapdb.Heaps in Python)",
+                ))
+            }
+        },
         Statement::Top(q) => {
             let opts = TopK {
                 k: q.k,
@@ -942,6 +984,16 @@ pub fn execute(db: &mut HeapDB, stmt: &Statement, now: f64) -> Result<Output> {
 /// Parse and run a statement.
 pub fn execute_str(db: &mut HeapDB, text: &str, now: f64) -> Result<Output> {
     execute(db, &parse(text)?, now)
+}
+
+/// Parse and run a statement, with heap statements going to `heaps`.
+pub fn execute_str_with(
+    db: &mut HeapDB,
+    heaps: &mut dyn HeapBackend,
+    text: &str,
+    now: f64,
+) -> Result<Output> {
+    execute_with(db, heaps, &parse(text)?, now)
 }
 
 #[cfg(test)]
