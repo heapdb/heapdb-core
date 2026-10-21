@@ -487,6 +487,101 @@ impl fmt::Display for HeapTop {
 }
 
 // ---------------------------------------------------------------------------
+// JSON parsing of results (clients of heapdb-server)
+// ---------------------------------------------------------------------------
+
+fn field<'a>(m: &'a Map<String, Value>, k: &str) -> Result<&'a Value> {
+    m.get(k)
+        .ok_or_else(|| Error::invalid(format!("missing field {}", repr_str(k))))
+}
+
+fn as_num(v: &Value, k: &str) -> Result<f64> {
+    match v {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) if s == "Infinity" => Some(f64::INFINITY),
+        Value::String(s) if s == "-Infinity" => Some(f64::NEG_INFINITY),
+        Value::String(s) if s == "NaN" => Some(f64::NAN),
+        _ => None,
+    }
+    .ok_or_else(|| Error::invalid(format!("field {} must be a number", repr_str(k))))
+}
+
+fn num_field(m: &Map<String, Value>, k: &str) -> Result<f64> {
+    as_num(field(m, k)?, k)
+}
+
+fn opt_num_field(m: &Map<String, Value>, k: &str) -> Result<Option<f64>> {
+    match m.get(k) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => as_num(v, k).map(Some),
+    }
+}
+
+fn str_field(m: &Map<String, Value>, k: &str) -> Result<String> {
+    field(m, k)?
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| Error::invalid(format!("field {} must be a string", repr_str(k))))
+}
+
+fn u64_field(m: &Map<String, Value>, k: &str) -> Result<u64> {
+    field(m, k)?
+        .as_u64()
+        .ok_or_else(|| Error::invalid(format!("field {} must be a non-negative integer", repr_str(k))))
+}
+
+fn obj_field(m: &Map<String, Value>, k: &str) -> Result<Attrs> {
+    match m.get(k) {
+        None | Some(Value::Null) => Ok(Attrs::new()),
+        Some(Value::Object(o)) => Ok(o.clone()),
+        Some(_) => Err(Error::invalid(format!("field {} must be an object", repr_str(k)))),
+    }
+}
+
+impl HeapInfo {
+    /// Inverse of [`HeapInfo::to_json`].
+    pub fn from_json(m: &Map<String, Value>) -> Result<HeapInfo> {
+        Ok(HeapInfo {
+            name: str_field(m, "name")?,
+            half_life: num_field(m, "half_life")?,
+            landmark: num_field(m, "landmark")?,
+            meta: obj_field(m, "meta")?,
+            size: u64_field(m, "size")?,
+        })
+    }
+}
+
+impl HeapItem {
+    /// Inverse of [`HeapItem::to_json`].
+    pub fn from_json(m: &Map<String, Value>) -> Result<HeapItem> {
+        Ok(HeapItem {
+            id: str_field(m, "id")?,
+            base: num_field(m, "base")?,
+            activity: opt_num_field(m, "activity")?,
+            key: opt_num_field(m, "key")?,
+            attrs: obj_field(m, "attrs")?,
+            version: u64_field(m, "version")?,
+        })
+    }
+}
+
+impl Ranked {
+    /// Inverse of [`Ranked::to_json`].
+    pub fn from_json(m: &Map<String, Value>) -> Result<Ranked> {
+        Ok(Ranked {
+            rank: u64_field(m, "rank")? as usize,
+            id: str_field(m, "id")?,
+            key: opt_num_field(m, "key")?,
+            score: num_field(m, "score")?,
+            heat: num_field(m, "heat")?,
+            base: num_field(m, "base")?,
+            attrs: obj_field(m, "attrs")?,
+            version: u64_field(m, "version")?,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The backend trait
 // ---------------------------------------------------------------------------
 
@@ -668,5 +763,21 @@ mod tests {
         let mut a = Attrs::new();
         a.insert("k".into(), serde_json::json!(["ok", {"x": "b\u{0}"}]));
         assert!(check_attrs(&a).is_err());
+    }
+
+    #[test]
+    fn json_round_trips() {
+        let mut m = MemoryHeaps::new();
+        let info = m
+            .create_heap(&HeapSpec::new("q", 60.0).landmark(0.0), 0.0)
+            .unwrap();
+        let it = m.push("q", "a", 1.0, 1e6, None).unwrap();
+        let r = m.get("q", "a", 0.0).unwrap().unwrap();
+        assert_eq!(r.score, f64::INFINITY);
+        let back = |v: Value| v.as_object().unwrap().clone();
+        assert_eq!(HeapInfo::from_json(&back(info.to_json())).unwrap(), info);
+        assert_eq!(HeapItem::from_json(&back(it.to_json())).unwrap(), it);
+        assert_eq!(Ranked::from_json(&back(r.to_json())).unwrap(), r);
+        assert!(Ranked::from_json(&Map::new()).is_err());
     }
 }

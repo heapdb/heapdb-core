@@ -32,7 +32,8 @@ heapdb = "heapdb.cli:main"
 manifest-path = "bindings/python/Cargo.toml"
 python-source = "bindings/python/python"
 module-name = "heapdb._core"
-features = []
+# The release wheels include the Postgres backend (Heaps(persist_to="postgres://...")).
+features = ["postgres"]
 include = [{ path = "LICENSE", format = "sdist" }]
 
 [tool.pytest.ini_options]

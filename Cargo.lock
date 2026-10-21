@@ -1403,6 +1403,7 @@ name = "heapdb-python"
 version = "0.6.0"
 dependencies = [
  "heapdb",
+ "heapdb-postgres",
  "indexmap",
  "pyo3",
  "serde_json",

@@ -37,6 +37,20 @@ fn filter_arg(obj: Option<&Bound<'_, PyAny>>) -> PyResult<Option<Filter>> {
     Filter::from_json(&to_json(o)?).map(Some).map_err(err)
 }
 
+/// Validate a filter (a dict, or a condition string such as
+/// ``"kind IN ('bug') AND NOT blocked = TRUE"``) and return its canonical
+/// dict form; ``None`` stays ``None``.
+#[pyfunction]
+#[pyo3(signature = (filter = None))]
+pub fn heap_filter<'py>(
+    py: Python<'py>,
+    filter: Option<&Bound<'py, PyAny>>,
+) -> PyResult<Option<Bound<'py, PyAny>>> {
+    filter_arg(filter)?
+        .map(|f| from_json(py, &f.to_json()))
+        .transpose()
+}
+
 fn now_or_clock(py: Python<'_>, now: Option<f64>) -> PyResult<f64> {
     match now {
         Some(n) => Ok(n),
@@ -60,6 +74,16 @@ pub struct PyRanked {
 
 #[pymethods]
 impl PyRanked {
+    /// Build from the JSON form (``to_dict()``, or a heapdb-server response).
+    #[staticmethod]
+    fn from_dict(d: &Bound<'_, PyAny>) -> PyResult<Self> {
+        match to_json(d)? {
+            serde_json::Value::Object(m) => Ok(PyRanked {
+                inner: heapdb::Ranked::from_json(&m).map_err(err)?,
+            }),
+            _ => Err(PyValueError::new_err("expected a dict")),
+        }
+    }
     /// 1-based position (0 from ``get``).
     #[getter]
     fn rank(&self) -> usize {
@@ -129,6 +153,16 @@ pub struct PyHeapItem {
 
 #[pymethods]
 impl PyHeapItem {
+    /// Build from the JSON form (``to_dict()``, or a heapdb-server response).
+    #[staticmethod]
+    fn from_dict(d: &Bound<'_, PyAny>) -> PyResult<Self> {
+        match to_json(d)? {
+            serde_json::Value::Object(m) => Ok(PyHeapItem {
+                inner: heapdb::HeapItem::from_json(&m).map_err(err)?,
+            }),
+            _ => Err(PyValueError::new_err("expected a dict")),
+        }
+    }
     #[getter]
     fn id(&self) -> &str {
         &self.inner.id
@@ -185,6 +219,16 @@ pub struct PyHeapInfo {
 
 #[pymethods]
 impl PyHeapInfo {
+    /// Build from the JSON form (``to_dict()``, or a heapdb-server response).
+    #[staticmethod]
+    fn from_dict(d: &Bound<'_, PyAny>) -> PyResult<Self> {
+        match to_json(d)? {
+            serde_json::Value::Object(m) => Ok(PyHeapInfo {
+                inner: heapdb::HeapInfo::from_json(&m).map_err(err)?,
+            }),
+            _ => Err(PyValueError::new_err("expected a dict")),
+        }
+    }
     #[getter]
     fn name(&self) -> &str {
         &self.inner.name
@@ -508,4 +552,17 @@ impl PyHeaps {
             heapdb::pyfmt::repr_str(&self.persist_to.to_string())
         )
     }
+}
+
+/// Run SQL on a Postgres URL (no results). Private: used by the test suite
+/// to create and drop scratch databases without a Python driver.
+#[cfg(feature = "postgres")]
+#[pyfunction]
+pub fn _pg_execute(py: Python<'_>, url: &str, sql: &str) -> PyResult<()> {
+    py.detach(|| {
+        let mut c = heapdb_postgres::connect(url)?;
+        c.batch_execute(sql)
+            .map_err(|e| heapdb::Error::Backend(format!("postgres: {e}")))
+    })
+    .map_err(err)
 }

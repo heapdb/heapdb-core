@@ -41,7 +41,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Iterator, Mapping, Sequence
 
-from ._core import Candidate, Event, QueryError
+from ._core import Candidate, Event, HeapInfo, HeapItem, QueryError, Ranked, heap_filter
 
 __all__ = [
     "AuthenticationError",
@@ -72,6 +72,7 @@ __all__ = [
     "RateLimitError",
     "RemoteConnectionError",
     "RemoteHeapDB",
+    "RemoteHeaps",
     "RiskResult",
     "ServiceUnavailableError",
     "SettleReport",
@@ -949,6 +950,11 @@ class RemoteHeapDB:
         return CalibrationReport._from(self._request("GET", "/calibration", query={"effect": effect,
                                                                                     "bins": int(bins)}))
 
+    @property
+    def heaps(self) -> RemoteHeaps:
+        """Keyed heaps of this database (the API of :class:`heapdb.Heaps`)."""
+        return RemoteHeaps(self)
+
     def execute(self, query: str, now: float | None = None) -> Any:
         """Run one query-language statement on the server (``now`` resolves
         ``now``/``now-2h``; default: server time). Returns the same result
@@ -961,7 +967,139 @@ class RemoteHeapDB:
         return {
             "top_causes": QueryResult._from, "calibration": CalibrationReport._from, "risk": RiskResult._from,
             "links": LinkReport._from, "observe": ObserveReport._from, "settle": SettleReport._from,
+            "heap_items": lambda x: [Ranked.from_dict(i) for i in x["items"]],
+            "heap": HeapInfo.from_dict,
+            "heaps": lambda x: [HeapInfo.from_dict(i) for i in x["heaps"]],
         }.get(kind, lambda x: x)(res)
+
+
+def _seg(s: str) -> str:
+    return urllib.parse.quote(s, safe="")
+
+
+class RemoteHeaps:
+    """Keyed heaps of a server database, with the API of :class:`heapdb.Heaps`
+    (``heapdb.connect(...).heaps``). Results are the same ``Ranked``,
+    ``HeapItem`` and ``HeapInfo`` classes. ``now`` / ``t`` default to the
+    server clock. ``push_many`` / ``set_base_many`` / ``set_attrs_many`` send
+    atomic batches of up to 1000 items."""
+
+    def __init__(self, db: RemoteHeapDB) -> None:
+        self._db = db
+
+    def __repr__(self) -> str:
+        return f"RemoteHeaps({self._db!r})"
+
+    def _path(self, heap: str, *rest: str) -> str:
+        return "/heaps/" + "/".join([_seg(heap), *rest])
+
+    @staticmethod
+    def _filter(filter: Any) -> Any:  # noqa: A002 - mirrors Heaps
+        # Validated and normalised locally (condition strings become dicts).
+        return heap_filter(filter)
+
+    def create_heap(self, name: str, half_life: float, landmark: float | None = None,
+                    meta: Mapping[str, Any] | None = None) -> HeapInfo:
+        body: dict[str, Any] = {"half_life": float(half_life)}
+        if landmark is not None:
+            body["landmark"] = float(landmark)
+        if meta is not None:
+            body["meta"] = dict(meta)
+        return HeapInfo.from_dict(self._db._request("PUT", self._path(name), body))
+
+    def drop_heap(self, name: str) -> bool:
+        return bool(self._db._request("DELETE", self._path(name))["dropped"])
+
+    def heap(self, name: str) -> HeapInfo | None:
+        try:
+            return HeapInfo.from_dict(self._db._request("GET", self._path(name)))
+        except NotFoundError as e:
+            if e.code == "unknown_heap":
+                return None
+            raise
+
+    def heaps(self) -> list[HeapInfo]:
+        return [HeapInfo.from_dict(h) for h in self._db._request("GET", "/heaps")["heaps"]]
+
+    def push(self, heap: str, id: str, weight: float = 1.0, t: float | None = None,  # noqa: A002
+             attrs: Mapping[str, Any] | None = None) -> HeapItem:
+        item: dict[str, Any] = {"id": id, "weight": float(weight)}
+        if t is not None:
+            item["time"] = float(t)
+        if attrs is not None:
+            item["attrs"] = dict(attrs)
+        return self.push_many(heap, [item])[0]
+
+    def push_many(self, heap: str, items: Iterable[Mapping[str, Any]]) -> list[HeapItem]:
+        """Atomic batch: ``[{id, weight?, time?, attrs?}, ...]`` (at most 1000)."""
+        r = self._db._post(self._path(heap, "push"), {"items": [dict(i) for i in items]})
+        return [HeapItem.from_dict(i) for i in r["items"]]
+
+    def set_base(self, heap: str, id: str, base: float) -> HeapItem:  # noqa: A002
+        return self.set_base_many(heap, [{"id": id, "base": float(base)}])[0]
+
+    def set_base_many(self, heap: str, items: Iterable[Mapping[str, Any]]) -> list[HeapItem]:
+        r = self._db._post(self._path(heap, "base"), {"items": [dict(i) for i in items]})
+        return [HeapItem.from_dict(i) for i in r["items"]]
+
+    def set_attrs(self, heap: str, id: str, attrs: Mapping[str, Any], merge: bool = False) -> HeapItem:  # noqa: A002
+        return self.set_attrs_many(heap, [{"id": id, "attrs": dict(attrs), "merge": bool(merge)}])[0]
+
+    def set_attrs_many(self, heap: str, items: Iterable[Mapping[str, Any]]) -> list[HeapItem]:
+        r = self._db._post(self._path(heap, "attrs"), {"items": [dict(i) for i in items]})
+        return [HeapItem.from_dict(i) for i in r["items"]]
+
+    def remove(self, heap: str, id: str) -> bool:  # noqa: A002
+        return bool(self._db._request("DELETE", self._path(heap, "items", _seg(id)))["removed"])
+
+    def get(self, heap: str, id: str, now: float | None = None) -> Ranked | None:  # noqa: A002
+        q = None if now is None else {"now": repr(float(now))}
+        try:
+            return Ranked.from_dict(self._db._request("GET", self._path(heap, "items", _seg(id)), query=q))
+        except NotFoundError as e:
+            if e.code == "unknown_item":
+                return None
+            raise
+
+    def top_k(self, heap: str, k: int = 10, now: float | None = None, filter: Any = None) -> list[Ranked]:  # noqa: A002
+        body: dict[str, Any] = {"k": int(k)}
+        if now is not None:
+            body["now"] = float(now)
+        f = self._filter(filter)
+        if f is not None:
+            body["filter"] = f
+        return [Ranked.from_dict(i) for i in self._db._post(self._path(heap, "top"), body)["items"]]
+
+    def pop(self, heap: str, now: float | None = None, filter: Any = None) -> Ranked | None:  # noqa: A002
+        body: dict[str, Any] = {}
+        if now is not None:
+            body["now"] = float(now)
+        f = self._filter(filter)
+        if f is not None:
+            body["filter"] = f
+        item = self._db._post(self._path(heap, "pop"), body)["item"]
+        return None if item is None else Ranked.from_dict(item)
+
+    def rebase(self, heap: str, now: float | None = None, half_life: float | None = None) -> HeapInfo:
+        body: dict[str, Any] = {}
+        if now is not None:
+            body["now"] = float(now)
+        if half_life is not None:
+            body["half_life"] = float(half_life)
+        return HeapInfo.from_dict(self._db._post(self._path(heap, "rebase"), body))
+
+    def execute(self, query: str, now: float | None = None) -> Any:
+        """Run one heap statement (``PEEK 5 FROM work WHERE ...``) on the server."""
+        return self._db.execute(query, now)
+
+    def close(self) -> None:
+        """Nothing to release; kept for symmetry with :class:`heapdb.Heaps`."""
+
+    def __enter__(self) -> RemoteHeaps:
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
 
 
 def connect(url_or_env: str | None = None, *, timeout: float = 30.0, retries: int = 3, backoff: float = 0.5,

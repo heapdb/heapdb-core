@@ -19,8 +19,9 @@ pyo3::create_exception!(
 pub fn err(e: Error) -> PyErr {
     let msg = e.to_string();
     match e {
-        Error::UnknownEffect(_) | Error::UnknownEvent(_) => PyKeyError::new_err(msg),
-        Error::Invalid(_) | Error::Snapshot(_) => PyValueError::new_err(msg),
+        Error::UnknownEffect(_) | Error::UnknownEvent(_) | Error::UnknownHeap(_) => PyKeyError::new_err(msg),
+        Error::Invalid(_) | Error::Snapshot(_) | Error::HeapConflict(_) => PyValueError::new_err(msg),
+        Error::Backend(_) => PyOSError::new_err(msg),
         Error::Type(_) => PyTypeError::new_err(msg),
         Error::Query(_) => QueryError::new_err(msg),
         Error::MissingArgument => PyIndexError::new_err(msg),
