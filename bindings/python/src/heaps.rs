@@ -337,6 +337,20 @@ pub struct PyHeaps {
     persist_to: PersistTo,
 }
 
+impl PyHeaps {
+    /// Run `f` on the backend (the GIL stays held: used by the REPL).
+    pub(crate) fn with_backend<T>(
+        &mut self,
+        f: impl FnOnce(&mut dyn HeapBackend) -> heapdb::Result<T>,
+    ) -> PyResult<T> {
+        let slot = self.backend.get_mut().unwrap_or_else(|p| p.into_inner());
+        let b = slot
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("Heaps is closed"))?;
+        f(b.as_mut()).map_err(err)
+    }
+}
+
 /// Run `$body` on the backend with the GIL released (Postgres round trips).
 macro_rules! with_backend {
     ($self:ident, $py:ident, |$b:ident| $body:expr) => {{

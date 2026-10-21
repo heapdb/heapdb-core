@@ -423,3 +423,19 @@ def test_remote_api(server):
     with pytest.raises(heapdb.remote.PermissionDeniedError):
         ro_db.heaps.create_heap("x", 60)
     assert h.drop_heap("acme/checkout") is True
+
+
+def test_repl_runs_heap_statements(tmp_path):
+    import io
+
+    from heapdb.cli import main, repl
+    out = io.StringIO()
+    repl(heapdb.HeapDB(), io.StringIO("CREATE HEAP w HALF LIFE 1h LANDMARK 0\nPUSH a INTO w WEIGHT 2 AT 0\n"
+                                      "PEEK 3 FROM w AT 3600\nPOP FROM nope\n"), out, heaps=Heaps())
+    text = out.getvalue()
+    assert "1. 'a'" in text and "score=1 heat=1" in text
+    assert "error: \"unknown heap 'nope'; call create_heap first\"" in text
+    f = tmp_path / "q.hql"
+    f.write_text("CREATE HEAP w HALF LIFE 1h LANDMARK 0\nPUSH a INTO w WEIGHT 2 AT 0\n")
+    assert main(["--heaps", f"native:{tmp_path / 'h'}", str(f)]) == 0
+    assert [r.id for r in Heaps(f"native:{tmp_path / 'h'}").top_k("w", now=0)] == ["a"]

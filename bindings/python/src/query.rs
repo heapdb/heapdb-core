@@ -685,12 +685,15 @@ pub fn parse_time(text: &str) -> PyResult<PyTimeExpr> {
 }
 
 /// Process one REPL line. Returns the (possibly replaced) db and output.
+/// Heap statements run against ``heaps`` (a ``heapdb.Heaps``) when given.
 #[pyfunction]
+#[pyo3(signature = (db, line, clock, heaps = None))]
 pub fn handle_line(
     py: Python<'_>,
     db: Py<PyHeapDB>,
     line: &str,
     clock: &Bound<'_, PyAny>,
+    heaps: Option<&Bound<'_, crate::heaps::PyHeaps>>,
 ) -> PyResult<(Py<PyHeapDB>, Option<String>)> {
     let mut clock_fn = || -> heapdb::Result<f64> {
         clock
@@ -700,7 +703,12 @@ pub fn handle_line(
     };
     let outcome = {
         let mut b = db.bind(py).borrow_mut();
-        heapdb::repl::handle_line(&mut b.db, line, &mut clock_fn).map_err(err)?
+        match heaps {
+            Some(h) => h
+                .borrow_mut()
+                .with_backend(|hb| heapdb::repl::handle_line_with(&mut b.db, hb, line, &mut clock_fn))?,
+            None => heapdb::repl::handle_line(&mut b.db, line, &mut clock_fn).map_err(err)?,
+        }
     };
     match outcome {
         heapdb::repl::Outcome::Quit => Err(PyEOFError::new_err(())),

@@ -71,7 +71,8 @@ Meta commands::
     .help / .quit
 
 Start with ``--load snapshot.jsonl`` to resume a saved database, and
-``--demo`` to preload a small bloating example.
+``--demo`` to preload a small bloating example. ``--heaps native:<dir>``
+keeps heaps in a directory (default: memory).
 "#;
 
 /// What a REPL line did.
