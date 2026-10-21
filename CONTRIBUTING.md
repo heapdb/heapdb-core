@@ -7,6 +7,11 @@ experiments are just as welcome as code.
 
 - `crates/heapdb/`: the engine (Rust library, no Python dependencies).
 - `crates/heapdb-cli/`: the native `heapdb` REPL / query-file runner.
+- `crates/heapdb-server/`: the server (`docs/server.md`).
+- `crates/heapdb-postgres/` and `sql/postgres/heapdb.sql`: keyed heaps in
+  Postgres, and the conformance suite every heap backend must pass
+  (`HEAPDB_TEST_POSTGRES_URL=postgres://... cargo test -p heapdb-postgres`).
+- `clients/typescript/`: `@heapdb/client`.
 - `bindings/python/`: PyO3 bindings (`heapdb._core`) and the thin `heapdb`
   Python package (re-exports, type stubs, CLI I/O).
 - `tests/`: the Python test suite (runs against the built extension).
@@ -33,7 +38,11 @@ experiments are just as welcome as code.
   the API; they follow Python's float formatting (`heapdb::pyfmt`).
 - **Snapshots.** Old snapshot formats must keep loading
   (`crates/heapdb/tests/fixtures`, written by the original v0.1/v0.2/v0.4
-  Python engine).
+  Python engine; `crates/heapdb-server/tests/fixtures` for server snapshots).
+- **Heap backends agree.** A change to heap semantics goes into
+  `MemoryHeaps` and `sql/postgres/heapdb.sql` together, and the conformance
+  suite (`crates/heapdb-postgres/tests/conformance.rs`) must pass against a
+  real Postgres.
 
 ## Getting started
 

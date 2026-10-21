@@ -38,9 +38,10 @@ The server never sees or stores API keys in clear: the Admin API registers
 `sha256(key)` (lowercase hex) with the key's scopes and optional expiry. A
 request's `Authorization: Bearer <api_key>` is hashed and looked up.
 
-**Scopes.** `read` (queries, reports), `write` (inserts and learning: events,
-feedback, observe, settle), `admin` (schema calls: effects, event types, rules,
-`forget_entity`). Scopes are independent; a full-access key has all three.
+**Scopes.** `read` (queries, reports, heap reads), `write` (inserts and
+learning: events, feedback, observe, settle; heap item changes and pops),
+`admin` (schema calls: effects, event types, rules, `forget_entity`; creating,
+dropping and rebasing heaps). Scopes are independent; a full-access key has all three.
 `GET /v1/databases/{id}` works with any valid key of the database.
 
 | Route | Scope |
@@ -49,7 +50,10 @@ feedback, observe, settle), `admin` (schema calls: effects, event types, rules,
 | `POST /effects`, `POST /event-types`, `POST /rules`, `DELETE /entities/{entity}` | `admin` |
 | `POST /events`, `POST /feedback`, `POST /observe`, `POST /settle` | `write` |
 | `POST /query/top-causes`, `POST /query/risk`, `GET /links`, `GET /calibration` | `read` |
-| `POST /hql` | `read` for TOP / RISK / LINKS / CALIBRATION, `write` for INSERT / FEEDBACK / OBSERVE / SETTLE |
+| `PUT /heaps/{heap}`, `DELETE /heaps/{heap}`, `POST /heaps/{heap}/rebase` | `admin` |
+| `POST /heaps/{heap}/push`, `/base`, `/attrs`, `/pop`, `DELETE /heaps/{heap}/items/{item}` | `write` |
+| `GET /heaps`, `GET /heaps/{heap}`, `POST /heaps/{heap}/top`, `GET /heaps/{heap}/items/{item}` | `read` |
+| `POST /hql` | `read` for TOP / RISK / LINKS / CALIBRATION / PEEK / SHOW HEAPS, `write` for INSERT / FEEDBACK / OBSERVE / SETTLE / PUSH / SET / POP / REMOVE, `admin` for CREATE HEAP / DROP HEAP / REBASE |
 
 The admin token (`HEAPDB_ADMIN_TOKEN`) is compared in constant time. Expose
 `/admin/*` only to the control plane's network (security group / listener rule).
@@ -217,12 +221,56 @@ Rows are associations under the model, not causal effects.
 
 `entity` is percent-encoded. → `{"counts": {"events", "segments", "links", "calibration_records"}}`.
 
+### Keyed heaps
+
+Named priority queues of keyed items ordered by forward decay (semantics,
+filters and numerics: [heaps.md](heaps.md)). `{heap}` and `{item}` are one
+percent-encoded path segment each (`acme%2Fcheckout`); names and ids are
+1-200 UTF-8 bytes. Times default to the server clock. Heap requests are
+admitted and counted like every other request; writes check the storage
+quota.
+
+| Method & path | Scope | Body → response |
+| --- | --- | --- |
+| `PUT /heaps/{heap}` | admin | `{half_life, landmark?, meta?}` → HeapInfo. Idempotent when the spec matches (an omitted `landmark` / `meta` matches anything); `409 heap_conflict` otherwise |
+| `GET /heaps` | read | `{heaps: [HeapInfo]}` |
+| `GET /heaps/{heap}` | read | HeapInfo, or `404 unknown_heap` |
+| `DELETE /heaps/{heap}` | admin | `{dropped}` |
+| `POST /heaps/{heap}/push` | write | `{items: [{id, weight? (1), time? (now), attrs?}]}` → `{items: [HeapItem]}` |
+| `POST /heaps/{heap}/base` | write | `{items: [{id, base}]}` → `{items: [HeapItem]}` |
+| `POST /heaps/{heap}/attrs` | write | `{items: [{id, attrs, merge? (false)}]}` → `{items: [HeapItem]}` |
+| `DELETE /heaps/{heap}/items/{item}` | write | `{removed}` |
+| `GET /heaps/{heap}/items/{item}?now=` | read | Ranked (`rank` 0), or `404 unknown_item` |
+| `POST /heaps/{heap}/top` | read | `{k? (10), now?, filter?}` → `{items: [Ranked]}` |
+| `POST /heaps/{heap}/pop` | write | `{now?, filter?}` (body optional) → `{item: Ranked \| null}` |
+| `POST /heaps/{heap}/rebase` | admin | `{now?, half_life?}` (body optional) → HeapInfo |
+
+**HeapInfo** `{name, half_life, landmark, meta, size}`; **HeapItem** `{id,
+base, activity, key, attrs, version}` (`activity` / `key` are `null` until
+the first push); **Ranked** `{rank, id, key, score, heat, base, attrs,
+version}` (`score` / `heat` may be `"Infinity"` for a push far in the
+future).
+
+Batches (`push`, `base`, `attrs`) hold 1-1000 items (`413 batch_too_large`
+above), are applied in order (repeated ids accumulate) and are atomic: an
+invalid item fails the whole request with `400 invalid_argument` naming it
+(`items[3]: weight must be finite and > 0`) and nothing is stored. Bad
+filters are `400 invalid_argument` naming the node (`filter.all[1].not:
+unknown op 'like' ...`). Other errors: `404 unknown_heap`, `404
+unknown_item`.
+
+Heap mutations are WAL records like every other write (a pop is logged
+with its clock and filter, so replay picks the same item), and heaps are
+part of snapshots.
+
 ### `POST /hql`
 
 `{"query": "TOP 3 CAUSES OF bloating FOR me AT now-1h EXPLAIN", "now"?: 1760000000}` →
-`{"kind": "top_causes"|"calibration"|"risk"|"links"|"observe"|"settle"|"message", "result": ..., "text"}`.
-One statement of the [query language](../README.md#query-language). `now`
-defaults to the server clock.
+`{"kind": "top_causes"|"calibration"|"risk"|"links"|"observe"|"settle"|"message"|"heap_items"|"heap"|"heaps", "result": ..., "text"}`.
+One statement of the [query language](../README.md#query-language), including
+heap statements: `PEEK` / `POP` give `heap_items` (`{heap, now, popped,
+items: [Ranked]}`), `CREATE HEAP` / `REBASE` give `heap` (HeapInfo), `SHOW
+HEAPS` gives `heaps`. `now` defaults to the server clock.
 
 ## Errors
 
@@ -237,10 +285,11 @@ defaults to the server clock.
 | 403 | `key_not_for_database` | key belongs to another database |
 | 403 | `database_suspended` | suspended (e.g. non-payment) |
 | 403 | `admin_disabled` | `HEAPDB_ADMIN_TOKEN` not set |
-| 404 | `database_not_found`, `unknown_effect`, `unknown_event`, `not_found` | |
+| 404 | `database_not_found`, `unknown_effect`, `unknown_event`, `unknown_heap`, `unknown_item`, `not_found` | |
 | 405 | `method_not_allowed` | |
 | 409 | `database_exists`, `key_exists` | Admin API conflicts |
-| 413 | `payload_too_large`, `batch_too_large` | body > 8 MiB / > 1000 events |
+| 409 | `heap_conflict` | `PUT /heaps/{heap}` with a spec that differs from the existing heap |
+| 413 | `payload_too_large`, `batch_too_large` | body > 8 MiB / > 1000 events or heap items |
 | 413 | `events_quota_exceeded`, `storage_quota_exceeded` | quota reached; not retryable |
 | 429 | `rate_limited` | per-minute limit; `Retry-After` |
 | 429 | `monthly_quota_exceeded` | monthly quota; `Retry-After` = seconds to the period end; do not retry earlier |
@@ -346,10 +395,12 @@ recovers it from storage under a new epoch.
 
 **Snapshots** are written every 5 minutes (if anything changed) or every
 10,000 WAL records, and when a database closes: `db/<id>/snap/<epoch>-<seq>.jsonl`
-= one header line (`{"kind":"heapdb_server", "format":1, "database_id",
-"epoch", "seq", "schema", "external_ids"}`: declarative weight functions and
-rules, the idempotency index) followed by the engine's JSONL snapshot (format
-v3, as `HeapDB.save`). Afterwards the WAL objects it covers and all but the
+= one header line (`{"kind":"heapdb_server", "format":2, "database_id",
+"epoch", "seq", "schema", "external_ids", "heaps"}`: declarative weight
+functions and rules, the idempotency index, the number of heap records),
+then that many keyed-heap records (`{"kind":"heap",...}` / `{"kind":"item",...}`),
+then the engine's JSONL snapshot (format v3, as `HeapDB.save`). Format 1
+snapshots (0.5, no heap section) still load. Afterwards the WAL objects it covers and all but the
 two newest snapshots are deleted.
 
 **Recovery** loads the newest valid snapshot and replays WAL records with a
@@ -487,8 +538,10 @@ Tuning (mostly for tests): `HEAPDB_LEASE_TTL_MS` (30000),
   predicates are declarative: `heapdb.remote.weight_attr("portion", 1.0)`,
   `weight_log1p("lines_changed")`, `weight_const(2)`,
   `where("amount", "<", 10, default=0)`. Errors are `heapdb.HeapDBError`
-  subclasses with `.code`, `.status`, `.retry_after`.
-* TypeScript: `@heapdb/client` (`connect(process.env.HEAPDB_URL!)`).
+  subclasses with `.code`, `.status`, `.retry_after`. `db.heaps` is the
+  keyed-heap API of `heapdb.Heaps` over the heap routes.
+* TypeScript: `@heapdb/client` (`connect(process.env.HEAPDB_URL!)`;
+  `heaps(db)` for keyed heaps).
 
 Both retry `429 rate_limited` and `503` with backoff honouring `Retry-After`,
 and never retry quota errors.

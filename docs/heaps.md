@@ -1,6 +1,8 @@
 # Keyed heaps and `persist_to`
 
-Status: proposal implemented on branch `keyed-heaps`. Version 0.6.
+Status: **implemented** in 0.6.0 (branch `keyed-heaps`). The decisions made
+while implementing, where the proposal left room or was changed, are listed
+in [Implementation notes](#implementation-notes) at the end.
 
 HeapDB's `ForwardDecayHeap` orders items by a forward-decay key so the order is right at every
 instant without re-scoring. Today it is an in-memory library structure: each `push` is a separate
@@ -32,7 +34,7 @@ equals ordering by score at every instant.
 
 | Operation | Effect |
 | --- | --- |
-| `create_heap(name, half_life, landmark = now, meta = {})` | idempotent when the spec matches; error otherwise |
+| `create_heap(name, half_life, landmark = now, meta = {})` | idempotent when the spec matches (an omitted landmark / meta matches anything); error otherwise |
 | `push(heap, id, weight, t = now, attrs?)` | `activity ← logaddexp(activity, ln weight + λ(t − L))`; creates the item (base 1) if missing; `attrs` replaces when given |
 | `set_base(heap, id, base)` | sets `base`; creates the item unranked if missing |
 | `set_attrs(heap, id, attrs, merge = false)` | replace or shallow-merge attributes |
@@ -83,9 +85,10 @@ the same trait and passes the same conformance suite.
 
 ```rust
 pub trait HeapBackend {
-    fn create_heap(&mut self, spec: &HeapSpec) -> Result<HeapInfo>;
+    fn create_heap(&mut self, spec: &HeapSpec, now: f64) -> Result<HeapInfo>;
     fn drop_heap(&mut self, name: &str) -> Result<bool>;
     fn heap(&self, name: &str) -> Result<Option<HeapInfo>>;
+    fn heaps(&self) -> Result<Vec<HeapInfo>>;
     fn push(&mut self, heap: &str, id: &str, weight: f64, t: f64, attrs: Option<&Attrs>) -> Result<HeapItem>;
     fn set_base(&mut self, heap: &str, id: &str, base: f64) -> Result<HeapItem>;
     fn set_attrs(&mut self, heap: &str, id: &str, attrs: &Attrs, merge: bool) -> Result<HeapItem>;
@@ -161,6 +164,112 @@ REBASE work;
   above; results are `Ranked` objects.
 - TypeScript (`@heapdb/client`): `heaps(target)` where `target` is a server connection
   (`connect(url)`) or a Postgres client with a `query(text, params)` method; same methods.
+
+## Implementation notes
+
+Decisions made while implementing, beyond or different from the proposal
+above.
+
+**Engine (`crates/heapdb/src/heaps`).**
+
+- `HeapBackend::create_heap` takes `now` (the landmark of a new heap
+  without one: the engine never reads a clock), and the trait has
+  `heaps()` to list heaps. `HeapSpec.landmark` and `.meta` are optional; an
+  omitted value matches an existing heap, so a repeated `create_heap(name,
+  half_life)` is idempotent.
+- Numerics are shared by every backend: `logaddexp(a, b) = hi + ln(1 +
+  exp(-(hi - lo)))`, skipping the `exp` when `hi - lo > 40` (the term is
+  exactly 0 there in `f64`; Postgres would raise an underflow error);
+  `exp` of the score is 0 below -745 and infinity above `ln(f64::MAX)`; `-0.0`
+  keys are normalised to `0.0` (Postgres compares them equal). Keys and
+  scores agree across backends within 1e-9 relative (in practice to the
+  last bit or one ulp).
+- A push whose `ln w + λ(t − L)` is not finite is rejected ("rebase the
+  heap"); a finite key whose score at `now` overflows gives `score =
+  Infinity` (JSON: `"Infinity"`).
+- `rebase` does not change item versions; every other change bumps them.
+  `set_attrs` on a missing item creates it (unranked, base 1), like
+  `set_base`.
+- `get` returns `rank` 0; unranked items (never pushed) have `key = None`,
+  `score = heat = 0`, are returned by `get` and counted in `size`, but never
+  listed by `top_k` / `pop`.
+- Ids and names: 1-200 UTF-8 bytes and no NUL character (Postgres `text`
+  cannot hold one); attrs, meta and filter values must not contain `\u0000`
+  (Postgres `jsonb` rejects it).
+- Filters: equality compares numbers numerically at any depth; strings are
+  ordered byte-wise (Postgres: `COLLATE "C"`); `{"all": []}` is true and
+  `{"any": []}` false; a present attribute of the wrong shape (a scalar for
+  `contains_all` / `subset_of`) does not match. Filters are validated
+  (unknown keys and ops, value shapes, depth ≤ 32, ≤ 1000 nodes) with errors
+  naming the node (`filter.all[1].not: unknown op 'like' ...`).
+- `MemoryHeaps` keeps a `BTreeSet<(key desc, id)>` index plus a map by id;
+  `top_k` walks the index and stops after `k` matches. Batched `push_many`,
+  `set_base_many`, `set_attrs_many` are atomic (used by the server's batch
+  routes).
+- `NativeHeaps`: one `HeapOp` per line in `ops.jsonl` with a sequence
+  number, `fsync`ed before returning; `checkpoint.jsonl` every 10,000 ops
+  (temp file, fsync, rename, directory fsync), then the log is truncated.
+  On open a torn last line (no trailing newline) is cut off; any other bad
+  line is an error. `pop` is logged as a `remove` of the chosen id. One
+  process per directory (not detected).
+- Query language: also `SET ATTRS <id> IN <heap> TO {json} [MERGE]`, `SHOW
+  HEAPS`, `CREATE HEAP ... [LANDMARK <time>] [META {json}]`, `PEEK/POP ...
+  [AT <time>]` and `REBASE <heap> [AT <time>] [HALF LIFE <d>]`; `!=` and `<>`.
+  Heap statements run through `query::execute_with(db, heaps, ...)`; plain
+  `execute` reports that it needs a heap backend. The `heapdb` binary takes
+  `--heaps memory|native:<dir>`.
+- `PersistTo::parse` accepts `memory` (or empty), `native:<dir>`,
+  `postgres://` and `postgresql://`; `PersistTo::open` on a Postgres URL
+  returns an error pointing to `heapdb_postgres::open`. Displayed URLs hide
+  the password.
+
+**Postgres (`sql/postgres/heapdb.sql`, crate `heapdb-postgres`).**
+
+- Function signatures: `create_heap(name, half_life, landmark, meta, now)`,
+  `push(heap, id, weight, t, attrs)`, `set_base(heap, id, base)`,
+  `set_attrs(heap, id, attrs, merge)`, `remove(heap, id)`, `get(heap, id,
+  now)`, `top_k(heap, k, now, filter)`, `pop(heap, now, filter)`,
+  `rebase(heap, now, half_life)`, `drop_heap(name)`, plus `heap_info(name)`,
+  `list_heaps()`, `matches(attrs, filter)` and `check_filter(filter)`.
+  `now` / `t` default to the transaction time. The item-returning functions
+  return rows shaped like HeapItem / Ranked / HeapInfo.
+- Errors use SQLSTATE `HD400` (invalid argument), `HD404` (unknown heap) and
+  `HD409` (conflicting `create_heap`); clients map them to their error types.
+- Table and column names are `COLLATE "C"`, so ties by id order the same as
+  in Rust. `key` is `GENERATED ALWAYS AS (ln(base) + activity + 0.0) STORED`
+  with a partial index on `(heap, key DESC, id) WHERE key IS NOT NULL`.
+  Numeric helpers are plpgsql so the planner cannot constant-fold an `exp`
+  that would raise.
+- The install is idempotent and serialised with an advisory lock; it
+  records the version in `heapdb.schema_version`. `heapdb_postgres::open`
+  runs it when the installed version differs.
+- TLS: rustls (`tokio-postgres-rustls`, `ring`) rather than
+  `postgres-native-tls`, so nothing links against OpenSSL and the abi3 wheels
+  build the same on Linux, macOS and Windows. `sslmode` follows libpq:
+  `prefer` (default) and `require` encrypt without verifying the
+  certificate, `verify-ca` / `verify-full` verify against the platform roots
+  plus `sslrootcert`.
+- Under row-level security, `pop` and `remove` only see the caller's rows;
+  writes that violate a policy fail with the policy error.
+
+**Server.** Heap ops are WAL records with every input resolved (default
+weight 1 and time `now` are filled in before logging; a pop records its
+clock and filter, and replays to the same item). Snapshots carry the heaps
+between the header and the engine section (format 2). Extra error codes:
+`unknown_item` (404) and `heap_conflict` (409). Heap names in paths are
+single percent-encoded segments, so `/` is `%2F`.
+
+**Clients.** Python: `heapdb.Heaps(persist_to)`, filters as dicts or
+condition strings (`"kind IN ('bug') AND NOT blocked = TRUE"`, compiled with
+the query-language parser), `heapdb.heap_filter()` to normalise one,
+`Ranked` / `HeapItem` / `HeapInfo` (`to_dict`, `from_dict`), and
+`heapdb.connect(...).heaps` (`RemoteHeaps`, also `push_many` etc.). The
+Postgres backend is behind the extension's `postgres` cargo feature, on in
+`pyproject.toml` and the release wheels (`heapdb._core.HAS_POSTGRES`).
+TypeScript: `heaps(target)` returns the same API for a server connection or
+a `query(text, params)` client; `pushMany` over Postgres is one statement
+(atomic, works with a pool); `HEAPDB_SQL` is generated from the SQL file at
+build time and `typecheck` fails if it is stale.
 
 ## Not in this change
 

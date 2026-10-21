@@ -21,8 +21,10 @@ TOP 3 CAUSES OF bloating FOR me AT now WITHIN 12h EXPLAIN
 
 > **Status: early, not production.** Since v0.5 the engine is written in
 > Rust (`crates/heapdb`) and Python uses it through PyO3 bindings with the
-> same `import heapdb` API as before. It is single-process and in-memory
-> (with JSONL snapshots), and it has not been hardened. APIs may change.
+> same `import heapdb` API as before. The library is single-process and
+> in-memory (with JSONL snapshots); durability comes from heapdb-server, and
+> keyed heaps can also live in a directory or in Postgres. It has not been
+> hardened. APIs may change.
 > Benchmarks: see below.
 
 ## The idea: "pop the top"
@@ -225,7 +227,25 @@ RISK OF <effect> FOR <entity> FEATURES <f>,<f>... [WEIGHT <w>] [TYPE <t>] [ATTRS
 OBSERVE <effect> FOR <entity> [AT <time>] [LEAK <x>]
 SETTLE [<effect>] UNTIL <time> [FOR <entity>]
 LINKS OF <effect> [FOR <entity>] [MIN <n>]
+
+CREATE HEAP <heap> HALF LIFE <duration> [LANDMARK <time>] [META {json}]
+PUSH <id> INTO <heap> WEIGHT <w> [AT <time>] [ATTRS {json}]
+SET BASE <id> IN <heap> TO <base>
+SET ATTRS <id> IN <heap> TO {json} [MERGE]
+PEEK <k> FROM <heap> [AT <time>] [WHERE <condition>]
+POP FROM <heap> [AT <time>] [WHERE <condition>]
+REMOVE <id> FROM <heap>
+REBASE <heap> [AT <time>] [HALF LIFE <duration>]
+DROP HEAP <heap>
+SHOW HEAPS
 ```
+
+Heap names and item ids are bare words or `'quoted'`. A `<condition>`
+combines `AND`, `OR`, `NOT` and parentheses over `attr = != < <= > >= value`,
+`attr [NOT] IN (...)`, `attr CONTAINS v`, `attr CONTAINS ALL (...)`,
+`attr SUBSET OF (...)`, `attr EXISTS` and `attr MISSING`; values are
+`'text'`, numbers, `TRUE` and `FALSE`. Heap statements run against a heap
+backend (`heapdb::query::execute_with`, `heapdb.Heaps.execute`).
 
 `FOR a,b,c` with several entities runs a group query. `<time>` can be
 seconds, `now`, `now-2h` or ISO-8601. `<duration>` can be `90`, `30m`,
@@ -237,6 +257,61 @@ type's weight function, else 1.0. The REPL (`python -m heapdb`) also has meta co
 `.help`. Rules and weight functions are callables (Python callables, or Rust
 closures / trait objects), so you register them through the API, not the
 query language.
+
+## Keyed heaps and `persist_to`
+
+A **keyed heap** is a named priority queue of items with string ids, ordered
+by forward decay: each `push(id, weight, t)` adds `weight` of activity that
+halves every `half_life`, `set_base` sets a slow-moving priority, and
+`score(now) = base x heat(now)`. Items carry JSON `attrs`, and `top_k` / `pop`
+take filters (`kind IN (...)`, `required_skills SUBSET OF (...)`, `NOT labels
+CONTAINS 'needs-human'`, ...). The order is right at every instant without
+re-scoring. Work queues for humans and coding agents are the first use. Same
+semantics everywhere; you choose where the state lives
+([docs/heaps.md](docs/heaps.md)):
+
+| `persist_to` | Where | Use |
+| --- | --- | --- |
+| `memory` (default) | process memory | tests, embedded, ephemeral |
+| `native:<dir>` | fsynced append-only op log + checkpoints in `<dir>` | embedded durable, one process |
+| server | a database on `heapdb-server` (WAL + snapshots) | hosted / cluster |
+| `postgres://...` | schema `heapdb` (tables + SQL functions, [`sql/postgres/heapdb.sql`](sql/postgres/heapdb.sql)) | apps that already run Postgres |
+
+A conformance suite runs the same seeded operations on every backend and
+requires identical results.
+
+```python
+import heapdb
+
+q = heapdb.Heaps("native:/var/lib/acme/queues")   # or None, "postgres://...", heapdb.connect(url).heaps
+q.create_heap("acme/checkout", half_life=3 * 86400)
+q.push("acme/checkout", "CHK-12", 1.5, attrs={"kind": "bug", "required_skills": ["ts"]})
+q.set_base("acme/checkout", "CHK-12", 4)
+job = q.pop("acme/checkout", filter="required_skills SUBSET OF ('ts', 'react') AND NOT labels CONTAINS 'needs-human'")
+print(job)          # 'CHK-12'  score=6 heat=1.5 base=4 v2 {"kind":"bug",...}
+```
+
+```sql
+-- psql -f sql/postgres/heapdb.sql  (idempotent; upgrades in place)
+SELECT * FROM heapdb.create_heap('acme/checkout', 259200);
+SELECT * FROM heapdb.push('acme/checkout', 'CHK-12', 1.5, extract(epoch from now()), '{"kind": "bug"}');
+SELECT * FROM heapdb.pop('acme/checkout', extract(epoch from now()),
+                         '{"attr": "kind", "op": "in", "value": ["bug", "task"]}');  -- FOR UPDATE SKIP LOCKED
+```
+
+```ts
+import { connect, heaps, installHeapSql } from "@heapdb/client";
+const q = heaps(connect(process.env.HEAPDB_URL!));   // or heaps(pgPool) after installHeapSql(pgPool)
+await q.push("acme/checkout", "CHK-12", 1.5, { attrs: { kind: "bug" } });
+const next = await q.pop("acme/checkout", { filter: { attr: "kind", op: "eq", value: "bug" } });
+```
+
+The query language has heap statements too (`CREATE HEAP work HALF LIFE 72h`,
+`PEEK 5 FROM work WHERE kind IN ('bug', 'task')`, ...; see below), in the
+REPL (`heapdb --heaps native:<dir>`), `Heaps.execute` and the server's `/hql`.
+`examples/work_queue.py` simulates a week of a queue shared by an agent and a
+human. `ForwardDecayHeap` (below) is unchanged: it is the in-memory building
+block for anonymous, handle-based items.
 
 ## Hosted & self-hosted server
 
@@ -298,10 +373,16 @@ crates/heapdb/               the engine (Rust library, no Python dependency)
   src/stats.rs               betainc (Lentz), beta_ppf / beta_interval, spearman, lgamma
   src/snapshot.rs            JSONL snapshots (reads v1, v2, v3; writes v3)
   src/forward_decay.rs       ForwardDecayHeap<T>
+  src/heaps/                 keyed heaps: types + HeapBackend + PersistTo (mod.rs), filters,
+                             MemoryHeaps, NativeHeaps (op log + checkpoints), HeapOp,
+                             heap statements of the query language (hql.rs)
   src/query.rs, src/repl.rs  query language (parser + executor), REPL commands
   src/pyfmt.rs               Python-compatible number formatting for the text output
   tests/                     property tests (proptest), behaviour tests, snapshot fixtures
-crates/heapdb-cli/           `heapdb` binary: REPL and query-file runner
+crates/heapdb-cli/           `heapdb` binary: REPL and query-file runner (`--heaps memory|native:<dir>`)
+crates/heapdb-postgres/      PostgresHeaps (sync `postgres` crate, rustls TLS), install(); the
+                             conformance suite over memory / native / Postgres
+sql/postgres/heapdb.sql      the Postgres heap engine (schema `heapdb`)
 crates/heapdb-server/        `heapdb-server`: HTTP Data/Admin API, WAL + snapshots, leases,
                              single node (local disk) or cluster (S3 + DynamoDB); docs/server.md
 bindings/python/
@@ -309,6 +390,8 @@ bindings/python/
   python/heapdb/             thin package: re-exports (heapdb.store, .links, .query, ...),
                              `_core.pyi` type stubs, `py.typed`, CLI terminal I/O,
                              `remote.py`: `heapdb.connect()` client for heapdb-server
+                             (`.heaps`: keyed heaps over the server routes)
+clients/typescript/          `@heapdb/client` (Data API, `heaps()` on a server or Postgres)
 tests/, examples/, benchmarks/   Python test suite, examples and benchmarks (use the package)
 ```
 
@@ -663,6 +746,19 @@ Design direction (**not implemented** beyond `forget_entity`):
 
 ## Changelog: Unreleased (0.6.0)
 
+- **Keyed heaps and `persist_to`** ([docs/heaps.md](docs/heaps.md)): named
+  heaps of keyed items ordered by forward decay, with `base`, JSON `attrs`,
+  filters and `version`s. Engine: `heapdb::heaps` (`HeapBackend`,
+  `MemoryHeaps`, `NativeHeaps` for `native:<dir>`, `PersistTo`, filters,
+  heap statements in the query language). New crate `heapdb-postgres`
+  (`PostgresHeaps`, `sql/postgres/heapdb.sql`). heapdb-server stores heaps
+  in each database's WAL and snapshots (snapshot header format 2; format 1
+  still loads) and serves `/v1/databases/{id}/heaps/...`. Python:
+  `heapdb.Heaps(persist_to=...)`, `Ranked` / `HeapItem` / `HeapInfo`,
+  `heapdb.connect(...).heaps`; the release wheels include the Postgres
+  backend. TypeScript: `heaps(connection | pgClient)`, `installHeapSql`.
+  The `heapdb` CLI takes `--heaps`. A conformance suite checks every backend
+  against `MemoryHeaps`. New example `examples/work_queue.py`.
 - **`heapdb.connect()`**: a client for HeapDB servers in the `heapdb`
   package (`heapdb/remote.py`, pure standard library). Parses
   `heapdb://<api_key>@<host>/<database_id>` (or `HEAPDB_URL`) and returns a
@@ -676,7 +772,7 @@ Design direction (**not implemented** beyond `forget_entity`):
 - **`heapdb-server`** (`crates/heapdb-server`): the data plane behind
   `api.heapdb.com`, also self-hostable (binary or
   `ghcr.io/heapdb/heapdb-server`). See [docs/server.md](docs/server.md).
-- The Python package version stays 0.5.0 until the 0.6.0 release.
+- Versions: the workspace, the Python package and `@heapdb/client` are 0.6.0.
 
 ## Changelog: v0.5
 

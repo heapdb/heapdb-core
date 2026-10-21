@@ -9,6 +9,7 @@ python examples/bloating.py
 python examples/incident_rca.py
 python examples/code_changes.py
 python examples/product_analytics.py
+python examples/work_queue.py
 ```
 
 ## `bloating.py`: personal health, learning from feedback
@@ -104,3 +105,13 @@ shows:
 - **One-shot effects.** `repeatable=False` for `converted` and `churned`.
 - **"Why did this user churn?"** `top_causes(..., explain=True)` for one
   churned user.
+
+## `work_queue.py`: a keyed heap as a work queue
+
+A seeded week of tickets on `heapdb.Heaps()`: every comment, ping or failing
+check is a `push` (activity decays with a 3-day half-life), severity is the
+`base`, and twice a day an agent pops the hottest ticket whose
+`required_skills` it has and that is not labelled `needs-human`, while a
+human prefers `needs-human` work. The script checks the remaining queue
+against a brute-force score. With `HEAPDB_TEST_POSTGRES_URL` set it runs the
+same week on `Heaps("postgres://...")` and checks the assignments match.
