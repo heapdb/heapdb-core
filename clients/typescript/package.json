@@ -1,6 +1,6 @@
 {
   "name": "@heapdb/client",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "TypeScript client for HeapDB: the Data API (hosted HeapDB Cloud or self-hosted heapdb-server) and keyed heaps on a server or directly in Postgres.",
   "license": "Apache-2.0",
   "author": "HeapDB",

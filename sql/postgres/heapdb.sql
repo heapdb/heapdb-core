@@ -683,7 +683,7 @@ $$;
 -- Version
 -- ---------------------------------------------------------------------------
 
-INSERT INTO heapdb.schema_version (singleton, version) VALUES (true, '0.6.0')
+INSERT INTO heapdb.schema_version (singleton, version) VALUES (true, '0.7.0')
 ON CONFLICT (singleton) DO UPDATE SET version = excluded.version, installed_at = now();
 
 COMMIT;

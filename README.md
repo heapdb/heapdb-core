@@ -744,7 +744,7 @@ Design direction (**not implemented** beyond `forget_entity`):
   entity's contribution), so the population prior cannot be used to infer
   any one entity's history.
 
-## Changelog: Unreleased (0.6.0)
+## Changelog: v0.7
 
 - **Keyed heaps and `persist_to`** ([docs/heaps.md](docs/heaps.md)): named
   heaps of keyed items ordered by forward decay, with `base`, JSON `attrs`,
@@ -759,6 +759,10 @@ Design direction (**not implemented** beyond `forget_entity`):
   backend. TypeScript: `heaps(connection | pgClient)`, `installHeapSql`.
   The `heapdb` CLI takes `--heaps`. A conformance suite checks every backend
   against `MemoryHeaps`. New example `examples/work_queue.py`.
+- Versions: the workspace, the Python package and `@heapdb/client` are 0.7.0.
+
+## Changelog: v0.6
+
 - **`heapdb.connect()`**: a client for HeapDB servers in the `heapdb`
   package (`heapdb/remote.py`, pure standard library). Parses
   `heapdb://<api_key>@<host>/<database_id>` (or `HEAPDB_URL`) and returns a
@@ -772,7 +776,7 @@ Design direction (**not implemented** beyond `forget_entity`):
 - **`heapdb-server`** (`crates/heapdb-server`): the data plane behind
   `api.heapdb.com`, also self-hostable (binary or
   `ghcr.io/heapdb/heapdb-server`). See [docs/server.md](docs/server.md).
-- Versions: the workspace, the Python package and `@heapdb/client` are 0.6.0.
+- The engine and its results are unchanged from 0.5.
 
 ## Changelog: v0.5
 

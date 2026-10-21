@@ -4,9 +4,9 @@ All notable changes to `@heapdb/client` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the package uses
 [Semantic Versioning](https://semver.org/).
 
-## [0.6.0] - Unreleased
+## [0.7.0] - Unreleased
 
-The client's version now follows HeapDB's (0.6.0).
+The client's version now follows HeapDB's (0.7.0).
 
 ### Added
 

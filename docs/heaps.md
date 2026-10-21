@@ -1,6 +1,6 @@
 # Keyed heaps and `persist_to`
 
-Status: **implemented** in 0.6.0 (branch `keyed-heaps`). The decisions made
+Status: **implemented** in 0.7.0 (branch `keyed-heaps`). The decisions made
 while implementing, where the proposal left room or was changed, are listed
 in [Implementation notes](#implementation-notes) at the end.
 
