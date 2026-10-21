@@ -1318,7 +1318,7 @@ dependencies = [
 
 [[package]]
 name = "heapdb"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "indexmap",
@@ -1331,14 +1331,14 @@ dependencies = [
 
 [[package]]
 name = "heapdb-cli"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "heapdb",
 ]
 
 [[package]]
 name = "heapdb-python"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "heapdb",
  "indexmap",
@@ -1348,7 +1348,7 @@ dependencies = [
 
 [[package]]
 name = "heapdb-server"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "aws-config",
