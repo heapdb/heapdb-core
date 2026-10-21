@@ -661,7 +661,7 @@ Design direction (**not implemented** beyond `forget_entity`):
   entity's contribution), so the population prior cannot be used to infer
   any one entity's history.
 
-## Changelog: Unreleased (0.6.0)
+## Changelog: v0.6
 
 - **`heapdb.connect()`**: a client for HeapDB servers in the `heapdb`
   package (`heapdb/remote.py`, pure standard library). Parses
@@ -676,7 +676,7 @@ Design direction (**not implemented** beyond `forget_entity`):
 - **`heapdb-server`** (`crates/heapdb-server`): the data plane behind
   `api.heapdb.com`, also self-hostable (binary or
   `ghcr.io/heapdb/heapdb-server`). See [docs/server.md](docs/server.md).
-- The Python package version stays 0.5.0 until the 0.6.0 release.
+- The engine and its results are unchanged from 0.5.
 
 ## Changelog: v0.5
 
