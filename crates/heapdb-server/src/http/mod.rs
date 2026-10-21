@@ -236,6 +236,7 @@ async fn fallback() -> ApiError {
 fn data_routes() -> Router<AppState> {
     Router::new()
         .route("/v1/databases/{id}", any(data::handle))
+        .route("/v1/databases/{id}/", any(data::handle))
         .route("/v1/databases/{id}/{*rest}", any(data::handle))
 }
 
