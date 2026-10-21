@@ -65,7 +65,7 @@ from ._core import (
 
 from .remote import HeapDBError, RemoteHeapDB, connect  # noqa: E402
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 __all__ = [
     "AppliedRule",

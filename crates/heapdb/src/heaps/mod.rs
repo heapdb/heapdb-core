@@ -101,9 +101,10 @@ pub fn push_activity(weight: f64, t: f64, lam: f64, landmark: f64) -> f64 {
     weight.ln() + lam * (t - landmark)
 }
 
-/// `key = ln(base) + activity`.
+/// `key = ln(base) + activity` (`-0.0` is normalised to `0.0`, so key
+/// order is the same as in Postgres, where the two compare equal).
 pub fn item_key(base: f64, activity: Option<f64>) -> Option<f64> {
-    activity.map(|a| base.ln() + a)
+    activity.map(|a| base.ln() + a + 0.0)
 }
 
 // ---------------------------------------------------------------------------

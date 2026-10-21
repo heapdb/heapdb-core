@@ -6,7 +6,7 @@ build-backend = "maturin"
 
 [project]
 name = "heapdb"
-version = "0.5.0"
+version = "0.6.0"
 description = "HeapDB: pop the most likely cause, right now. Ranked, explainable attribution over an append-only event stream (Rust engine, Python bindings)."
 readme = "README.md"
 license = { text = "Apache-2.0" }
