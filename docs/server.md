@@ -14,9 +14,10 @@ databases behind an HTTP/JSON API. It powers the hosted service at
 ```python
 import heapdb
 db = heapdb.connect("heapdb://hdb_live_...@api.heapdb.com/db_7Kq2...")  # or HEAPDB_URL
-db.register_effect("bloating", heapdb.LogNormalKernel(median=2 * 3600, sigma=0.6))
-db.insert("me", t, "meal", {"beans"})
-db.top_causes("me", "bloating", at=now, k=3, explain=True)
+db.register_effect("error_spike", heapdb.LogNormalKernel(median=45 * 60, sigma=0.7))
+db.insert("checkout", t, "deploy", {"migration", "review:fast"}, attrs={"lines_changed": 420},
+          external_id="pr-412")
+db.top_causes("checkout", "error_spike", at=now, k=3, explain=True)
 ```
 
 Contents: [Identifiers and credentials](#identifiers-and-credentials) ·
@@ -105,9 +106,9 @@ quota is used up):
 ### `POST /effects` (admin)
 
 ```json
-{"name": "bloating",
- "kernel": {"type": "lognormal", "params": {"median": 7200, "sigma": 0.6}},
- "priors": {"beans": [3, 1]}, "default_prior": [1, 4], "cause_types": ["meal"],
+{"name": "error_spike",
+ "kernel": {"type": "lognormal", "params": {"median": 2700, "sigma": 0.7}},
+ "priors": {"migration": [3, 1], "deps": [2, 2]}, "default_prior": [1, 4], "cause_types": ["deploy"],
  "credit": "proportional", "global_pseudocount": 5, "hierarchical": true,
  "leak": 0.05, "w_neg": 1, "repeatable": true}
 ```
@@ -154,9 +155,9 @@ numerically, strings lexicographically, mixed types never match.
 ### `POST /events` (write)
 
 ```json
-{"events": [{"entity": "me", "time": 1760000000, "type": "meal",
-             "features": ["beans", "onion"], "weight": 1.5, "attrs": {"portion": 2},
-             "external_id": "meal-8812"}],
+{"events": [{"entity": "checkout", "time": 1760000000, "type": "deploy",
+             "features": ["migration", "review:fast"], "attrs": {"lines_changed": 420, "pr": 412},
+             "external_id": "pr-412"}],
  "return_events": false}
 ```
 
@@ -173,7 +174,7 @@ removed by `forget_entity`.
 
 ### `POST /query/top-causes` (read)
 
-`{"entity": "me" | "entities": ["a", "b"], "effect": "bloating", "at": 1760007200, "k": 3, "within": 43200, "explain": true}`
+`{"entity": "checkout" | "entities": ["checkout", "payments"], "effect": "error_spike", "at": 1760003000, "k": 3, "within": 43200, "explain": true}`
 
 → `{"entity", "entities", "effect", "at", "causes": [{"rank", "event", "score", "explanation"?}], "stats": {"segments_in_window", "segments_scanned", "segments_pruned", "events_scanned", "union_fallbacks"}, "text"}`.
 `k` defaults to 3. `entities` runs `top_causes_group`.
@@ -219,7 +220,7 @@ Rows are associations under the model, not causal effects.
 
 ### `POST /hql`
 
-`{"query": "TOP 3 CAUSES OF bloating FOR me AT now-1h EXPLAIN", "now"?: 1760000000}` →
+`{"query": "TOP 3 CAUSES OF error_spike FOR checkout AT now WITHIN 12h EXPLAIN", "now"?: 1760003000}` →
 `{"kind": "top_causes"|"calibration"|"risk"|"links"|"observe"|"settle"|"message", "result": ..., "text"}`.
 One statement of the [query language](../README.md#query-language). `now`
 defaults to the server clock.
@@ -484,10 +485,10 @@ Tuning (mostly for tests): `HEAPDB_LEASE_TTL_MS` (30000),
 * Python: `heapdb.connect(url_or_env=None, *, timeout=30, retries=3)` in the
   `heapdb` package (pure standard library) returns a `RemoteHeapDB` with the
   methods and result attributes of `heapdb.HeapDB`. Weight functions and
-  predicates are declarative: `heapdb.remote.weight_attr("portion", 1.0)`,
-  `weight_log1p("lines_changed")`, `weight_const(2)`,
-  `where("amount", "<", 10, default=0)`. Errors are `heapdb.HeapDBError`
-  subclasses with `.code`, `.status`, `.retry_after`.
+  predicates are declarative: `heapdb.remote.weight_log1p("lines_changed")`,
+  `weight_attr("rollout_pct", 100)`, `weight_const(2)`,
+  `where("kind", "==", "docs")`, `where("amount", "<", 10, default=0)`.
+  Errors are `heapdb.HeapDBError` subclasses with `.code`, `.status`, `.retry_after`.
 * TypeScript: `@heapdb/client` (`connect(process.env.HEAPDB_URL!)`).
 
 Both retry `429 rate_limited` and `503` with backoff honouring `Retry-After`,
