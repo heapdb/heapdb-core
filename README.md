@@ -130,11 +130,12 @@ build backend, [maturin](https://www.maturin.rs), is fetched by `pip`.
 Releases are published from tags (`vX.Y.Z`) by CI with PyPI trusted
 publishing; the tag must match the version in `pyproject.toml`.
 
-### TypeScript client (preview)
+### TypeScript client (coming to npm)
 
-`npm install @heapdb/client` connects to a hosted or self-hosted HeapDB server over
-the Data API (`connect("heapdb://<key>@<host>/<db>")`). See
-[clients/typescript](clients/typescript).
+`@heapdb/client` connects to a hosted or self-hosted HeapDB server over the Data
+API (`connect("heapdb://<key>@<host>/<db>")`). It lives in
+[clients/typescript](clients/typescript); build it from there until it is
+published to npm.
 
 ### Develop
 
