@@ -1,53 +1,67 @@
 # HeapDB
 
-**Pop the most likely cause, right now.**
+**Find the events that explain what happened.**
 
-HeapDB is a database whose primary operation is not `SELECT` but *"given what
-just happened, what most likely caused it?"*. You append events to a log; when
-an effect shows up you ask for the top-k candidate causes. HeapDB ranks them
-and explains each score.
+HeapDB is a general-purpose, open-source event-ranking database. You append
+events to a log: merged PRs, deploys, config changes, support tickets,
+anything with a time and a few features. When errors spike, a user churns or
+an agent needs context, you ask which events most likely explain it. HeapDB
+ranks them, explains each score and learns from your feedback. The lead use
+case is code changes and incidents: which deploy or PR caused this error
+spike?
 
 ```
-TOP 3 CAUSES OF bloating FOR me AT now WITHIN 12h EXPLAIN
+TOP 3 CAUSES OF error_spike FOR checkout AT now WITHIN 12h EXPLAIN
 ```
 
 ```
-  1. #23 meal@484200 [coffee,dairy] w=0.8         score=0.4528
-      lag 1.50h -> kernel 0.845 x weight 0.8 x link 0.670 [noisy-OR of coffee+dairy=0.67 (joint link 0.83, a=5.80, b=1.20) inseparable]
-      warning: 'coffee', 'dairy' always co-occur (6 events): feedback cannot separate their effects yet; reported as joint cause coffee+dairy
-  2. #22 meal@478800 [beans,onion,rice] w=1.5     score=0.3495
-  ...
+Top causes of 'error_spike' for checkout at t=904800:
+  1. #70 deploy@901800 [migration,review:fast] w=1.31 score=0.6537
+      lag 0.83h -> kernel 0.696 x weight 1.31 x link 0.717 [noisy-OR of migration=0.63 (a=7.56, b=4.44), review:fast=0.23 (a=1.88, b=6.12)]
+  2. #68 deploy@898800 [deps,tests] w=1.13        score=0.0994
+      lag 1.67h -> kernel 0.184 x weight 1.13 x link 0.480 [noisy-OR of deps=0.43 (a=3, b=4), tests=0.09 (a=1.45, b=14.55)]
+  3. #71 deploy@903600 [tests] w=0.891            score=0.0725
+      lag 0.33h -> kernel 0.900 x weight 0.891 x link 0.090 [noisy-OR of tests=0.09 (a=1.45, b=14.55)]
+  [segments: 3 scanned / 2 pruned / 5 in window; events scored: 3]
 ```
 
-> **Status: early, not production.** Since v0.5 the engine is written in
-> Rust (`crates/heapdb`) and Python uses it through PyO3 bindings with the
-> same `import heapdb` API as before. It is single-process and in-memory
-> (with JSONL snapshots), and it has not been hardened. APIs may change.
-> Benchmarks: see below.
+This is a synthetic `checkout` service with ten days of deploys, where each
+earlier spike got feedback (the reverted PR confirmed, the cleared suspects
+rejected). The 420-line migration that shipped with a fast review 50 minutes
+before the spike is the likely cause, and every factor of its score is shown.
 
-## The idea: "pop the top"
+HeapDB has a Rust engine (`crates/heapdb`), a Python API on PyPI
+(`pip install heapdb`) and `heapdb-server` for hosted and self-hosted use.
+Benchmarks: see below.
+
+## The idea
 
 Plenty of questions have the same shape:
 
-| Effect                     | Candidate causes                        |
-|----------------------------|-----------------------------------------|
-| I feel bloated             | meals in the last ~12h                  |
-| p99 latency spiked         | deploys, config changes, flag flips     |
-| a user churned             | support tickets, outages, price changes |
-| a sensor alarmed           | maintenance actions, weather events     |
-| an incident / broken main  | merged PRs and deploys (AI-authored or not) |
+| Effect                    | Candidate causes                             |
+|---------------------------|----------------------------------------------|
+| errors spiked             | merged PRs, deploys, config changes          |
+| an incident / broken main | merged PRs and deploys (AI-authored or not)  |
+| p99 latency spiked        | deploys, config changes, flag flips          |
+| an agent needs context    | recent events on the entity it is working on |
+| a user churned            | support tickets, outages, price changes      |
+| a sensor alarmed          | maintenance actions, weather events          |
+| a symptom appeared        | meals, medication, activity in the last ~12h |
 
 They all come down to ranking recent events by:
 
 1. **Timing.** Does the lag between event and effect fit how this effect
-   usually lags its causes? This is a *lag kernel* per effect type.
-2. **Dose.** How much of it was there (portion size, deploy size, amount)?
-   This is the event *weight*: exposure magnitude, default 1.0.
-3. **Plausibility.** Do this event's features tend to produce this effect?
-   This is a *learned link strength* per (feature, effect), shared across
-   entities through a global layer.
-4. **Rules.** Optional soft domain rules ("small transactions are rarely
-   fraud": ×0.3).
+   usually lags its causes? An error spike usually follows the bad deploy
+   within minutes to a couple of hours. This is a *lag kernel* per effect
+   type.
+2. **Dose.** How big was the change (lines changed, files touched, rollout
+   percentage)? This is the event *weight*: exposure magnitude, default 1.0.
+3. **Plausibility.** Do this event's features (`migration`, `deps`,
+   `review:fast`, `config`) tend to produce this effect? This is a *learned
+   link strength* per (feature, effect), shared across entities through a
+   global layer.
+4. **Rules.** Optional soft domain rules ("docs-only changes are rarely the
+   cause": ×0.1).
 
 ```
 score(event | effect) = kernel(dt) × weight × noisy_OR_f( strength(f, effect) ) × Π rules
@@ -116,11 +130,12 @@ build backend, [maturin](https://www.maturin.rs), is fetched by `pip`.
 Releases are published from tags (`vX.Y.Z`) by CI with PyPI trusted
 publishing; the tag must match the version in `pyproject.toml`.
 
-### TypeScript client (preview)
+### TypeScript client (coming to npm)
 
-`npm install @heapdb/client` connects to a hosted or self-hosted HeapDB server over
-the Data API (`connect("heapdb://<key>@<host>/<db>")`). See
-[clients/typescript](clients/typescript).
+`@heapdb/client` connects to a hosted or self-hosted HeapDB server over the Data
+API (`connect("heapdb://<key>@<host>/<db>")`). It lives in
+[clients/typescript](clients/typescript); build it from there until it is
+published to npm.
 
 ### Develop
 
@@ -130,48 +145,63 @@ pip install maturin pytest
 maturin develop --release    # build the extension into the venv
 pytest                       # Python test suite
 cargo test --workspace       # Rust unit, property and fixture tests
-python examples/bloating.py
-python examples/incident_rca.py
 python examples/code_changes.py
+python examples/incident_rca.py
 python examples/product_analytics.py
+python examples/bloating.py
 python -m heapdb --demo      # REPL (also: `heapdb` script)
 cargo run -p heapdb-cli -- --demo          # the same REPL as a native binary
 cargo run -p heapdb-cli -- queries.hql     # run a query file
 ```
 
 ```python
+import math
+
 from heapdb import HeapDB, LogNormalKernel
 
-H = 3600
+M, H = 60, 3600
 db = HeapDB(bucket_seconds=900)
 db.register_effect(
-    "bloating",
-    kernel=LogNormalKernel(median=2 * H, sigma=0.6),   # peaks ~1.4h, long tail
-    priors={"beans": (3, 1), "dairy": (2, 1)},          # Beta(alpha, beta)
+    "error_spike",
+    kernel=LogNormalKernel(median=45 * M, sigma=0.7),  # median lag 45 min, long tail
+    priors={"migration": (3, 1), "deps": (2, 2)},       # Beta(alpha, beta): domain knowledge
 )
+# Dose = change size: log1p(lines_changed), scaled so that a 100-line PR weighs 1.0.
+db.register_event_type("deploy", weight=lambda a: math.log1p(a["lines_changed"]) / math.log1p(100))
 
-db.insert(entity="me", time=8 * H,  type="meal", features={"oats", "dairy"})
-lunch = db.insert(entity="me", time=13 * H, type="meal", features={"beans", "onion"},
-                  weight=1.5)                            # weight = dose (portion)
+# Merged PRs deployed to checkout this morning (times in seconds).
+db.insert("checkout", 9 * H + 10 * M, "deploy", {"docs"}, attrs={"pr": 405, "lines_changed": 12})
+db.insert("checkout", 9 * H + 40 * M, "deploy", {"deps", "tests"}, attrs={"pr": 407, "lines_changed": 180})
+db.insert("checkout", 10 * H + 5 * M, "deploy", {"config"}, attrs={"pr": 409, "lines_changed": 8})
+pr412 = db.insert("checkout", 10 * H + 30 * M, "deploy", {"migration", "review:fast"},
+                  attrs={"pr": 412, "lines_changed": 420})
+db.insert("checkout", 11 * H, "deploy", {"tests"}, attrs={"pr": 414, "lines_changed": 60})
 
-res = db.top_causes(entity="me", effect="bloating", at=15 * H, k=3, explain=True)
+# Errors spike at 11:20. Which deploy most likely caused it?
+res = db.top_causes("checkout", "error_spike", at=11 * H + 20 * M, k=3, explain=True)
 for c in res:
-    print(c.rank, c.event.short(), round(c.score, 3))
+    print(c.rank, c.event.attrs["pr"], c.event.short(), round(c.score, 3))
     print("   ", c.explanation)
+# 1 412 #4 deploy@37800 [migration,review:fast] w=1.31 0.73
+#     lag 0.83h -> kernel 0.696 x weight 1.31 x link 0.800 [noisy-OR of migration=0.75 ...
 print(res.stats)            # segments scanned / pruned
 
-# Tell HeapDB what really happened. Confirmed features share the credit in
-# proportion to their strength (EM for noisy-OR); rejected ones get beta += 1.
-rep = db.feedback("me", "bloating", at_time=15 * H, confirmed_event_id=lunch.id)
-print(rep.credit)           # {'beans': 0.9375, 'onion': 0.25}
+# Reverting PR-412 stopped the errors: tell HeapDB. The confirmed PR's features
+# share the credit in proportion to their strength (EM for noisy-OR); the
+# cleared suspects are rejected (beta += 1 for each of their features).
+cleared = [c.event.id for c in res if c.event.id != pr412.id]
+rep = db.feedback("checkout", "error_spike", at_time=11 * H + 20 * M,
+                  confirmed_event_id=pr412.id, rejected_ids=cleared)
+print(rep.credit)           # {'migration': 0.9375, 'review:fast': 0.25}
 
-print(db.calibration_report("bloating"))
+print(db.calibration_report("error_spike"))
 
-# Pre-event risk of something that has not happened yet (no timing term).
-print(db.feature_risk("bloating", {"beans", "rice"}, weight=1.0, entity="me"))
+# Pre-merge risk of an open PR (no timing term): review it carefully?
+print(db.feature_risk("error_spike", {"migration", "review:fast"}, weight=None,
+                      entity="checkout", type="deploy", attrs={"lines_changed": 250}))  # 0.996
 
-db.save("me.jsonl")
-db2 = HeapDB.load("me.jsonl")
+db.save("checkout.jsonl")
+db2 = HeapDB.load("checkout.jsonl")
 ```
 
 ### Using the Rust crate directly
@@ -185,34 +215,45 @@ use std::sync::Arc;
 use heapdb::{EffectOptions, EventRef, HeapDB, Kernel, NewEvent, TopK};
 
 fn main() -> heapdb::Result<()> {
-    let h = 3600.0;
+    let (m, h) = (60.0, 3600.0);
     let mut db = HeapDB::new(900.0, 64)?; // bucket_seconds, max_sets_per_segment
     db.register_effect(
-        "bloating",
-        EffectOptions::new(Kernel::lognormal(2.0 * h, 0.6)?)
-            .prior("beans", 3.0, 1.0)
-            .prior("dairy", 2.0, 1.0),
+        "error_spike",
+        EffectOptions::new(Kernel::lognormal(45.0 * m, 0.7)?)
+            .prior("migration", 3.0, 1.0)
+            .prior("deps", 2.0, 2.0),
     )?;
-    // Soft rule: small portions are rarely the cause (predicate = any closure).
-    let small = |e: &EventRef<'_>| e.weight < 0.5;
-    db.add_rule("bloating", "small portion", Some(Arc::new(small)), 0.4, None)?;
+    // Soft rule: docs-only changes are rarely the cause (predicate = any closure).
+    let docs_only = |e: &EventRef<'_>| e.features.len() == 1 && e.features.contains("docs");
+    db.add_rule("error_spike", "docs only", Some(Arc::new(docs_only)), 0.1, None)?;
 
-    db.insert(NewEvent::new("me", 8.0 * h, "meal").features(["oats", "dairy"]))?;
-    let lunch = db.insert(NewEvent::new("me", 13.0 * h, "meal").features(["beans", "onion"]).weight(1.5))?;
+    // Dose = change size: log1p(lines changed), a 100-line PR weighs 1.0.
+    let size = |lines: f64| lines.ln_1p() / 100f64.ln_1p();
+    let deploy = |t: f64, features: &[&str], lines: f64| {
+        NewEvent::new("checkout", t, "deploy")
+            .features(features.iter().copied())
+            .weight(size(lines))
+    };
+    db.insert(deploy(9.0 * h + 10.0 * m, &["docs"], 12.0))?;
+    db.insert(deploy(9.0 * h + 40.0 * m, &["deps", "tests"], 180.0))?;
+    db.insert(deploy(10.0 * h + 5.0 * m, &["config"], 8.0))?;
+    let pr412 = db.insert(deploy(10.0 * h + 30.0 * m, &["migration", "review:fast"], 420.0))?;
+    db.insert(deploy(11.0 * h, &["tests"], 60.0))?;
 
-    let res = db.top_causes("me", "bloating", 15.0 * h, TopK::new(3).explain(true))?;
+    let spike = 11.0 * h + 20.0 * m;
+    let res = db.top_causes("checkout", "error_spike", spike, TopK::new(3).explain(true))?;
     println!("{res}"); // same text as format_result() in Python
 
-    let rep = db.feedback("me", "bloating", 15.0 * h, Some(lunch.id), &[], None)?;
-    println!("{:?}", rep.credit); // [("beans", 0.9375), ("onion", 0.25)]
-    db.save("me.jsonl")?;
+    let rep = db.feedback("checkout", "error_spike", spike, Some(pr412.id), &[], None)?;
+    println!("{:?}", rep.credit); // [("migration", 0.9375), ("review:fast", 0.25)]
+    db.save("checkout.jsonl")?;
     Ok(())
 }
 ```
 
-The query language is available too (`heapdb::query::execute_str(&mut db,
-"TOP 3 CAUSES OF bloating FOR me AT now EXPLAIN", now)`), as is the REPL
-logic (`heapdb::repl::handle_line`).
+The query language is available too
+(`heapdb::query::execute_str(&mut db, "TOP 3 CAUSES OF error_spike FOR checkout AT now WITHIN 12h EXPLAIN", now)`),
+as is the REPL logic (`heapdb::repl::handle_line`).
 
 ### Query language
 
@@ -246,20 +287,23 @@ DynamoDB). `heapdb.connect()` returns a client with the `HeapDB` API:
 
 ```python
 import heapdb
-from heapdb.remote import weight_attr, where
+from heapdb.remote import weight_log1p, where
 
 db = heapdb.connect("heapdb://hdb_live_...@api.heapdb.com/db_7Kq2...")  # or set HEAPDB_URL
-db.register_effect("bloating", heapdb.LogNormalKernel(median=2 * 3600, sigma=0.6),
-                   priors={"beans": (3, 1)})
-db.register_event_type("meal", weight=weight_attr("portion", default=1.0))  # declarative, no code upload
-db.add_rule("bloating", "tiny portion", where("portion", "<", 0.3), 0.5)
-db.insert("me", t, "meal", {"beans", "onion"}, attrs={"portion": 1.5}, external_id="meal-42")
+db.register_effect("error_spike", heapdb.LogNormalKernel(median=45 * 60, sigma=0.7),
+                   priors={"migration": (3, 1), "deps": (2, 2)})
+db.register_event_type("deploy", weight=weight_log1p("lines_changed"))  # declarative, no code upload
+db.add_rule("error_spike", "docs only", where("kind", "==", "docs"), 0.1)
+db.insert("checkout", t, "deploy", {"migration", "review:fast"},
+          attrs={"lines_changed": 420, "kind": "schema"}, external_id="pr-412")
 db.insert_many(events)                                  # batched, 1000 per request
-for c in db.top_causes("me", "bloating", at=now, k=3, explain=True):
+for c in db.top_causes("checkout", "error_spike", at=now, k=3, explain=True):
     print(c.rank, c.event.short(), c.score, c.explanation)
 ```
 
-Results have the same attributes as the local ones. Errors are
+`weight_log1p("lines_changed")` makes the dose `log1p(lines_changed)`, and
+`where("kind", "==", "docs")` matches events whose `kind` attribute is
+`"docs"`. Results have the same attributes as the local ones. Errors are
 `heapdb.HeapDBError` subclasses with a `.code`; rate limits and transient
 `503`s are retried honouring `Retry-After`, quota errors are not. The client is
 pure standard library (no extra dependencies).
@@ -439,9 +483,9 @@ update. `feedback()` returns the credit given to each feature.
 
 **Joint causes.** Co-occurrence is still tracked: features whose entity-wide
 posting lists are identical have *always* co-occurred, so feedback cannot
-separate them ("was it the coffee or the milk?"). When such a group has
-received feedback, the explanation presents it as **one joint cause**
-(`coffee+dairy`) with an `inseparable` flag and a warning. For every
+separate them ("was it the migration or the fast review?"). When such a
+group has received feedback, the explanation presents it as **one joint
+cause** (`migration+review:fast`) with an `inseparable` flag and a warning. For every
 inseparable set that actually appeared on a confirmed or rejected event,
 HeapDB keeps a joint Beta link, keyed by `frozenset` and created lazily. On
 confirmation the set gets credit `noisyOR(set) / noisyOR(event)`. On
@@ -451,16 +495,16 @@ the joint link is still shown, marked as now separable.
 
 ### Weight semantics: dose / exposure
 
-`weight` is the **magnitude of exposure**: portion size, deploy size, amount
-moved. It defaults to 1.0 and must be finite and > 0. **Propensity** ("deploys
+`weight` is the **magnitude of exposure**: change size, rollout percentage,
+amount moved. It defaults to 1.0 and must be finite and > 0. **Propensity** ("deploys
 are riskier than flag flips") does not belong in the weight. It belongs in
 links (learned) or rules (declared). Weights can be derived from event
 attributes:
 
 ```python
-db.register_event_type("meal",   weight=lambda a: a.get("portion", 1.0))
 db.register_event_type("deploy", weight=lambda a: math.log1p(a["lines_changed"]))
-db.insert("svc", t, "deploy", {"orm_upgrade"}, attrs={"lines_changed": 420})
+db.register_event_type("flag",   weight=lambda a: a.get("rollout_pct", 100) / 100)
+db.insert("checkout", t, "deploy", {"migration"}, attrs={"lines_changed": 420})
 ```
 
 An explicit `weight=` always wins over the type's weight function.
@@ -468,6 +512,8 @@ An explicit `weight=` always wins over the type's weight function.
 ### Plausibility rules
 
 ```python
+db.add_rule("error_spike", "docs only",
+            predicate=lambda e: e.features == {"docs"}, multiplier=0.1)
 db.add_rule("fraud", "small transaction",
             predicate=lambda e: e.attrs.get("amount", 0) < 10, multiplier=0.3)
 db.add_rule("latency_spike", "flags are gated", predicate=None, multiplier=0.5,
@@ -477,7 +523,7 @@ db.add_rule("latency_spike", "flags are gated", predicate=None, multiplier=0.5,
 Matching events get `score *= multiplier`. The multiplier must be in
 `[0, 1]`: 0 is a hard block, and values above 1 are rejected so that segment
 bounds stay valid. Every applied rule appears in the explanation
-(`x rules small transaction x0.3`). `cause_types` remains the type-level
+(`x rules docs only x0.1`). `cause_types` remains the type-level
 hard filter. As a temporal sanity check, every kernel returns 0 for negative
 lag, and `score()` also returns 0 for any event after the effect.
 
@@ -782,9 +828,9 @@ Design direction (**not implemented** beyond `forget_entity`):
   `feedback()` returns a `FeedbackReport` with each feature's credit and
   validates all ids before changing anything.
 - **Joint causes.** Always-co-occurring features with feedback are reported
-  as one joint cause (`beans+onion`) with a lazily created joint Beta link
-  (bounded to sets that appeared on feedback events) and an `inseparable`
-  flag. Scoring is unchanged.
+  as one joint cause (`migration+review:fast`) with a lazily created joint
+  Beta link (bounded to sets that appeared on feedback events) and an
+  `inseparable` flag. Scoring is unchanged.
 - **Hierarchical priors.** Registered prior + leave-one-out global evidence
   capped at `global_pseudocount` (default 5) + the entity's own counts. This
   can be switched off per effect (`hierarchical=False`). New:

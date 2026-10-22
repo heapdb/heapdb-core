@@ -44,7 +44,7 @@ maturin develop --release          # build the extension into the venv
 pytest                             # Python suite
 cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace             # Rust unit, property and fixture tests
-python examples/bloating.py
+python examples/code_changes.py
 cargo run -p heapdb-cli -- --demo  # native REPL
 ```
 
