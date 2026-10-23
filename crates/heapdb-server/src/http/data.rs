@@ -14,6 +14,9 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use super::{bearer, percent_decode, query_pairs, AppState};
+use crate::catalog::{
+    limit_param, EFFECTS_LIMIT, ENTITIES_LIMIT, EVENT_TYPES_LIMIT, OCCURRENCES_LIMIT, TOP_FEATURES,
+};
 use crate::database::{now_secs, OpenDb};
 use crate::error::{ApiError, ApiResult};
 use crate::ids::is_database_id;
@@ -59,6 +62,14 @@ pub enum DataOp {
     Forget(String),
     /// `POST /hql`
     Hql,
+    /// `GET /effects` (catalog)
+    ListEffects,
+    /// `GET /entities` (catalog)
+    ListEntities,
+    /// `GET /event-types` (catalog)
+    ListEventTypes,
+    /// `GET /occurrences` (catalog)
+    ListOccurrences,
 }
 
 fn method_not_allowed(method: &Method, path: &str) -> ApiError {
@@ -79,6 +90,14 @@ pub fn parse_route(method: &Method, rest: &str) -> ApiResult<DataOp> {
             Err(method_not_allowed(method, rest))
         }
     };
+    // Paths that take GET (catalog) and POST (schema).
+    let get_or_post = |get: DataOp, post: DataOp| -> ApiResult<DataOp> {
+        match *method {
+            Method::GET => Ok(get),
+            Method::POST => Ok(post),
+            _ => Err(method_not_allowed(method, rest)),
+        }
+    };
     if let Some(ent) = r.strip_prefix("/entities/") {
         if ent.is_empty() || ent.contains('/') {
             return Err(ApiError::not_found(format!("no route {rest}")));
@@ -87,8 +106,10 @@ pub fn parse_route(method: &Method, rest: &str) -> ApiResult<DataOp> {
     }
     match r {
         "" => want(Method::GET, DataOp::Info),
-        "/effects" => want(Method::POST, DataOp::Effects),
-        "/event-types" => want(Method::POST, DataOp::EventTypes),
+        "/effects" => get_or_post(DataOp::ListEffects, DataOp::Effects),
+        "/event-types" => get_or_post(DataOp::ListEventTypes, DataOp::EventTypes),
+        "/entities" => want(Method::GET, DataOp::ListEntities),
+        "/occurrences" => want(Method::GET, DataOp::ListOccurrences),
         "/rules" => want(Method::POST, DataOp::Rules),
         "/events" => want(Method::POST, DataOp::Events),
         "/query/top-causes" => want(Method::POST, DataOp::TopCauses),
@@ -115,7 +136,14 @@ fn need_of(op: &DataOp, b: &Bytes) -> ApiResult<Need> {
         DataOp::Info => Need::Any,
         DataOp::Effects | DataOp::EventTypes | DataOp::Rules | DataOp::Forget(_) => Need::Scope(Scope::Admin),
         DataOp::Events | DataOp::Feedback | DataOp::Observe | DataOp::Settle => Need::Scope(Scope::Write),
-        DataOp::TopCauses | DataOp::Risk | DataOp::Links | DataOp::Calibration => Need::Scope(Scope::Read),
+        DataOp::TopCauses
+        | DataOp::Risk
+        | DataOp::Links
+        | DataOp::Calibration
+        | DataOp::ListEffects
+        | DataOp::ListEntities
+        | DataOp::ListEventTypes
+        | DataOp::ListOccurrences => Need::Scope(Scope::Read),
         DataOp::Hql => {
             let req: HqlReq = body(b)?;
             let stmt = heapdb::parse(&req.query)?;
@@ -298,6 +326,37 @@ async fn serve(db: &OpenDb, rec: &DbRecord, op: DataOp, query: Option<&str>, raw
             };
             db.write(WalOp::Forget { entity, scrub_global }).await
         }
+        DataOp::ListEffects => {
+            let q = query_pairs(query)?;
+            let limit = limit_param(&q, "limit", EFFECTS_LIMIT)?;
+            let cursor = q.get("cursor").cloned();
+            db.read(|s| s.catalog_effects(limit, cursor.as_deref())).await
+        }
+        DataOp::ListEntities => {
+            let q = query_pairs(query)?;
+            let limit = limit_param(&q, "limit", ENTITIES_LIMIT)?;
+            let prefix = q.get("prefix").cloned().filter(|p| !p.is_empty());
+            let cursor = q.get("cursor").cloned();
+            db.read(|s| s.catalog_entities(prefix.as_deref(), limit, cursor.as_deref()))
+                .await
+        }
+        DataOp::ListEventTypes => {
+            let q = query_pairs(query)?;
+            let top = limit_param(&q, "features", TOP_FEATURES)?;
+            let limit = limit_param(&q, "limit", EVENT_TYPES_LIMIT)?;
+            let cursor = q.get("cursor").cloned();
+            db.read(|s| s.catalog_event_types(top, limit, cursor.as_deref()))
+                .await
+        }
+        DataOp::ListOccurrences => {
+            let q = query_pairs(query)?;
+            let limit = limit_param(&q, "limit", OCCURRENCES_LIMIT)?;
+            let effect = q.get("effect").cloned().filter(|e| !e.is_empty());
+            let entity = q.get("entity").cloned().filter(|e| !e.is_empty());
+            let cursor = q.get("cursor").cloned();
+            db.read(|s| s.catalog_occurrences(effect.as_deref(), entity.as_deref(), limit, cursor.as_deref()))
+                .await
+        }
         DataOp::Hql => {
             let req: HqlReq = body(&raw)?;
             let now = req.now.unwrap_or_else(now_secs);
@@ -403,5 +462,34 @@ mod tests {
             "method_not_allowed"
         );
         assert_eq!(parse_route(&Method::GET, "/nope").unwrap_err().code, "not_found");
+        assert_eq!(
+            parse_route(&Method::GET, "/effects").unwrap(),
+            DataOp::ListEffects
+        );
+        assert_eq!(parse_route(&Method::POST, "/effects").unwrap(), DataOp::Effects);
+        assert_eq!(
+            parse_route(&Method::GET, "/event-types/").unwrap(),
+            DataOp::ListEventTypes
+        );
+        assert_eq!(
+            parse_route(&Method::POST, "/event-types").unwrap(),
+            DataOp::EventTypes
+        );
+        assert_eq!(
+            parse_route(&Method::GET, "/entities").unwrap(),
+            DataOp::ListEntities
+        );
+        assert_eq!(
+            parse_route(&Method::GET, "/occurrences").unwrap(),
+            DataOp::ListOccurrences
+        );
+        assert_eq!(
+            parse_route(&Method::DELETE, "/effects").unwrap_err().code,
+            "method_not_allowed"
+        );
+        assert_eq!(
+            parse_route(&Method::POST, "/entities").unwrap_err().code,
+            "method_not_allowed"
+        );
     }
 }

@@ -41,6 +41,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod catalog;
 pub mod error;
 pub mod event;
 pub mod forward_decay;
@@ -59,6 +60,10 @@ mod snapshot;
 pub mod stats;
 pub mod store;
 
+pub use catalog::{
+    EffectPage, EffectSummary, EntityPage, EntitySummary, EventTypeCatalog, EventTypeSummary, Occurrence,
+    OccurrenceKey, OccurrencePage, PriorSummary,
+};
 pub use error::{BoxError, Error, ErrorKind, Result};
 pub use event::{Attrs, Event, EventRef, Features};
 pub use forward_decay::{ForwardDecayHeap, Popped};

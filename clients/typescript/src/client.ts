@@ -6,7 +6,13 @@ import type {
   CalibrationReportOptions,
   ConnectOptions,
   DatabaseInfo,
+  EffectPage,
+  EffectsOptions,
+  EntitiesOptions,
+  EntityPage,
   EventInput,
+  EventTypeCatalog,
+  EventTypesOptions,
   FeatureRiskOptions,
   FeedbackOptions,
   FeedbackReport,
@@ -17,6 +23,8 @@ import type {
   LinkReportOptions,
   ObserveOptions,
   ObserveReport,
+  OccurrencePage,
+  OccurrencesOptions,
   QueryResult,
   RankCandidatesOptions,
   RankedCandidate,
@@ -34,10 +42,14 @@ import {
   compact,
   decodeCalibration,
   decodeCounts,
+  decodeEffects,
+  decodeEntities,
+  decodeEventTypes,
   decodeFeedback,
   decodeInfo,
   decodeLinkReport,
   decodeObserve,
+  decodeOccurrences,
   decodeQueryResult,
   decodeRanked,
   decodeRisk,
@@ -411,6 +423,61 @@ export class HeapDB {
       split(opts),
     );
     return decodeCalibration(res, opts.effect);
+  }
+
+  // -- catalog ----------------------------------------------------------------
+
+  /** Registered effects with kernels, priors and counts (registration order); paginate with `cursor`. */
+  async effects(opts: EffectsOptions = {}): Promise<EffectPage> {
+    const res = await this.#http.request(
+      "GET",
+      "/effects",
+      undefined,
+      { limit: opts.limit, cursor: opts.cursor || undefined },
+      split(opts),
+    );
+    return decodeEffects(res);
+  }
+
+  /** Entities by most recent activity, optionally by name prefix; paginate with `cursor`. */
+  async entities(opts: EntitiesOptions = {}): Promise<EntityPage> {
+    const res = await this.#http.request(
+      "GET",
+      "/entities",
+      undefined,
+      { prefix: opts.prefix || undefined, limit: opts.limit, cursor: opts.cursor || undefined },
+      split(opts),
+    );
+    return decodeEntities(res);
+  }
+
+  /** Event types with counts and their most common features (most events first); paginate with `cursor`. */
+  async eventTypes(opts: EventTypesOptions = {}): Promise<EventTypeCatalog> {
+    const res = await this.#http.request(
+      "GET",
+      "/event-types",
+      undefined,
+      { features: opts.features, limit: opts.limit, cursor: opts.cursor || undefined },
+      split(opts),
+    );
+    return decodeEventTypes(res);
+  }
+
+  /** Effect occurrences (from observe and feedback), newest first; `cursor` goes further back. */
+  async occurrences(opts: OccurrencesOptions = {}): Promise<OccurrencePage> {
+    const res = await this.#http.request(
+      "GET",
+      "/occurrences",
+      undefined,
+      {
+        effect: opts.effect,
+        entity: opts.entity,
+        limit: opts.limit,
+        cursor: opts.cursor || undefined,
+      },
+      split(opts),
+    );
+    return decodeOccurrences(res);
   }
 
   // -- admin / misc -----------------------------------------------------------

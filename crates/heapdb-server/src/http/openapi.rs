@@ -296,6 +296,102 @@ fn schemas() -> Value {
         ),
     );
     put("Ok", obj(json!({"ok": {"type": "boolean"}}), &["ok"]));
+    put(
+        "EffectInfo",
+        obj(
+            json!({
+                "name": {"type": "string"},
+                "kernel": obj(json!({
+                    "type": {"type": "string", "enum": ["exponential", "window", "lognormal", "gamma"]},
+                    "params": {"type": "object", "description": "As accepted by POST /effects (seconds)."},
+                    "human": {"type": "object", "description": "Seconds, named *_s: half_life_s, min_lag_s, median_s, mean_s, plus peak_s and max_lag_s."},
+                    "text": {"type": "string"}
+                }), &["type", "params", "human", "text"]),
+                "credit": {"type": "string", "enum": ["proportional", "uniform"]},
+                "combine": {"type": "string", "enum": ["noisy_or", "logistic"]},
+                "logistic": nullable(obj(json!({
+                    "learning_rate": r("Number"), "l2": r("Number"),
+                    "base_log_odds": {"type": "number", "description": "learned intercept"}
+                }), &["learning_rate", "l2", "base_log_odds"])),
+                "cause_types": nullable(arr(json!({"type": "string"}))),
+                "priors": obj(json!({
+                    "count": {"type": "integer"}, "default": arr(r("Number")),
+                    "top": arr(obj(json!({"feature": {"type": "string"}, "alpha": r("Number"), "beta": r("Number"), "strength": r("Number")}), &["feature", "alpha", "beta", "strength"]))
+                }), &["count", "default", "top"]),
+                "rules": arr(json!({"type": "string"})),
+                "hierarchical": {"type": "boolean"}, "global_pseudocount": r("Number"),
+                "leak": r("Number"), "w_neg": r("Number"), "repeatable": {"type": "boolean"},
+                "counts": obj(json!({
+                    "occurrences": {"type": "integer"}, "occurrence_entities": {"type": "integer"},
+                    "feedback": {"type": "integer"}, "feedback_confirmed": {"type": "integer"},
+                    "learned_features": {"type": "integer"}
+                }), &["occurrences", "occurrence_entities", "feedback", "feedback_confirmed", "learned_features"])
+            }),
+            &[
+                "name",
+                "kernel",
+                "credit",
+                "combine",
+                "logistic",
+                "cause_types",
+                "priors",
+                "rules",
+                "hierarchical",
+                "global_pseudocount",
+                "leak",
+                "w_neg",
+                "repeatable",
+                "counts",
+            ],
+        ),
+    );
+    put(
+        "EntityInfo",
+        obj(
+            json!({
+                "name": {"type": "string"}, "event_count": {"type": "integer"},
+                "first_event_time": {"type": "number"}, "last_event_time": {"type": "number"}
+            }),
+            &["name", "event_count", "first_event_time", "last_event_time"],
+        ),
+    );
+    put(
+        "EventTypeInfo",
+        obj(
+            json!({
+                "type": {"type": "string"}, "count": {"type": "integer"},
+                "last_event_time": nullable(json!({"type": "number"})), "registered": {"type": "boolean"},
+                "weight": nullable(r("WeightSpec")),
+                "top_features": arr(obj(json!({"feature": {"type": "string"}, "count": {"type": "integer"}}), &["feature", "count"]))
+            }),
+            &[
+                "type",
+                "count",
+                "last_event_time",
+                "registered",
+                "weight",
+                "top_features",
+            ],
+        ),
+    );
+    put(
+        "OccurrenceInfo",
+        obj(
+            json!({
+                "effect": {"type": "string"}, "entity": {"type": "string"}, "at": {"type": "number"},
+                "sources": arr(json!({"type": "string", "enum": ["observe", "feedback"]})),
+                "confirmed_event_id": nullable(json!({"type": "integer"})), "rejected": {"type": "integer"}
+            }),
+            &[
+                "effect",
+                "entity",
+                "at",
+                "sources",
+                "confirmed_event_id",
+                "rejected",
+            ],
+        ),
+    );
     Value::Object(s)
 }
 
@@ -371,6 +467,92 @@ pub fn document() -> Value {
             )),
             r("Ok"),
             none.clone(),
+        ),
+    );
+    add(
+        "/effects",
+        "get",
+        op(
+            "Catalog: registered effects with kernels, priors and counts (registration order, paged)",
+            "read",
+            None,
+            obj(
+                json!({
+                    "effects": arr(r("EffectInfo")), "next_cursor": nullable(json!({"type": "string"})),
+                    "total_effects": {"type": "integer"}
+                }),
+                &["effects", "next_cursor", "total_effects"],
+            ),
+            json!([
+                {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100}},
+                qp("cursor", "string", false)
+            ]),
+        ),
+    );
+    add(
+        "/event-types",
+        "get",
+        op(
+            "Catalog: event types with counts and their most common features (examines at most the 100,000 most recent events; truncated says so)",
+            "read",
+            None,
+            obj(
+                json!({
+                    "event_types": arr(r("EventTypeInfo")), "next_cursor": nullable(json!({"type": "string"})),
+                    "total_types": {"type": "integer"}, "events_scanned": {"type": "integer"},
+                    "total_events": {"type": "integer"}, "truncated": {"type": "boolean"}
+                }),
+                &["event_types", "next_cursor", "total_types", "events_scanned", "total_events", "truncated"],
+            ),
+            json!([
+                {"name": "features", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20}},
+                {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100}},
+                qp("cursor", "string", false)
+            ]),
+        ),
+    );
+    add(
+        "/entities",
+        "get",
+        op(
+            "Catalog: entities by most recent activity (examines at most 100,000 entities; truncated says so)",
+            "read",
+            None,
+            obj(
+                json!({
+                    "entities": arr(r("EntityInfo")), "next_cursor": nullable(json!({"type": "string"})),
+                    "matched": {"type": "integer"}, "scanned": {"type": "integer"},
+                    "total_entities": {"type": "integer"}, "truncated": {"type": "boolean"}
+                }),
+                &["entities", "next_cursor", "matched", "scanned", "total_entities", "truncated"],
+            ),
+            json!([
+                qp("prefix", "string", false),
+                {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50}},
+                qp("cursor", "string", false)
+            ]),
+        ),
+    );
+    add(
+        "/occurrences",
+        "get",
+        op(
+            "Catalog: recent effect occurrences recorded by observe and feedback, newest first (paged)",
+            "read",
+            None,
+            obj(
+                json!({
+                    "occurrences": arr(r("OccurrenceInfo")), "next_cursor": nullable(json!({"type": "string"})),
+                    "truncated": {"type": "boolean"}
+                }),
+                &["occurrences", "next_cursor", "truncated"],
+            ),
+            json!([
+                qp("effect", "string", false),
+                qp("entity", "string", false),
+                {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 200, "default": 20}},
+                qp("cursor", "string", false)
+            ]),
         ),
     );
     add(

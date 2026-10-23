@@ -14,9 +14,15 @@ import type {
   CandidateInput,
   Cause,
   DatabaseInfo,
+  EffectInfo,
+  EffectPage,
+  EntityInfo,
+  EntityPage,
   Event,
   EventCredit,
   EventInput,
+  EventTypeCatalog,
+  EventTypeInfo,
   Explanation,
   FeatureContribution,
   Features,
@@ -25,12 +31,15 @@ import type {
   LinkReport,
   LinkRow,
   ObserveReport,
+  OccurrenceInfo,
+  OccurrencePage,
   QueryResult,
   QueryStats,
   RankedCandidate,
   RiskResult,
   SettleReport,
   Time,
+  WeightSpec,
 } from "./types.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: decoded JSON
@@ -351,5 +360,130 @@ export function decodeInfo(r: J): DatabaseInfo {
     plan: str(r?.plan),
     usage: camelKeys(r?.usage),
     limits: camelKeys(r?.limits),
+  };
+}
+
+// -- catalog ----------------------------------------------------------------
+
+/** A number the server may send as `"Infinity"`, `"-Infinity"` or `"NaN"`. */
+const numX = (v: J, d = 0): number => {
+  if (typeof v === "number") return v;
+  if (v === "Infinity") return Infinity;
+  if (v === "-Infinity") return -Infinity;
+  if (v === "NaN") return NaN;
+  return d;
+};
+
+const numRec = (v: J): Record<string, number> => {
+  const out: Record<string, number> = {};
+  for (const [k, x] of Object.entries(rec(v))) {
+    const n = numX(x, NaN);
+    if (typeof x === "number" || !Number.isNaN(n) || x === "NaN") out[k] = n;
+  }
+  return out;
+};
+
+export function decodeEffects(r: J): EffectPage {
+  return {
+    effects: arr(r?.effects).map(decodeEffect),
+    nextCursor: strOrNull(r?.next_cursor),
+    totalEffects: num(r?.total_effects),
+  };
+}
+
+function decodeEffect(e: J): EffectInfo {
+  return {
+    name: str(e?.name),
+    kernel: {
+      type: str(e?.kernel?.type),
+      params: numRec(e?.kernel?.params),
+      human: numRec(e?.kernel?.human),
+      text: str(e?.kernel?.text),
+    },
+    credit: e?.credit === "uniform" ? "uniform" : "proportional",
+    combine: e?.combine === "logistic" ? "logistic" : "noisy_or",
+    logistic:
+      e?.logistic && typeof e.logistic === "object"
+        ? {
+            learningRate: numX(e.logistic.learning_rate),
+            l2: numX(e.logistic.l2),
+            baseLogOdds: numX(e.logistic.base_log_odds),
+          }
+        : null,
+    causeTypes: Array.isArray(e?.cause_types) ? e.cause_types.map((x: J) => str(x)) : null,
+    priors: {
+      count: num(e?.priors?.count),
+      default: [num(e?.priors?.default?.[0], 1), num(e?.priors?.default?.[1], 4)],
+      top: arr(e?.priors?.top).map((p: J) => ({
+        feature: str(p?.feature),
+        alpha: num(p?.alpha),
+        beta: num(p?.beta),
+        strength: num(p?.strength),
+      })),
+    },
+    rules: arr(e?.rules).map((x: J) => str(x)),
+    hierarchical: e?.hierarchical !== false,
+    globalPseudocount: numX(e?.global_pseudocount),
+    leak: numX(e?.leak),
+    wNeg: numX(e?.w_neg, 1),
+    repeatable: e?.repeatable !== false,
+    counts: Object.fromEntries(Object.entries(numRec(e?.counts)).map(([k, v]) => [camelKey(k), v])),
+  };
+}
+
+export function decodeEntities(r: J): EntityPage {
+  return {
+    entities: arr(r?.entities).map(
+      (e: J): EntityInfo => ({
+        name: str(e?.name),
+        eventCount: num(e?.event_count),
+        firstEventTime: num(e?.first_event_time),
+        lastEventTime: num(e?.last_event_time),
+      }),
+    ),
+    nextCursor: strOrNull(r?.next_cursor),
+    matched: num(r?.matched),
+    totalEntities: num(r?.total_entities),
+    truncated: r?.truncated === true,
+  };
+}
+
+export function decodeEventTypes(r: J): EventTypeCatalog {
+  return {
+    eventTypes: arr(r?.event_types).map(
+      (t: J): EventTypeInfo => ({
+        type: str(t?.type),
+        count: num(t?.count),
+        lastEventTime: numOrNull(t?.last_event_time),
+        registered: t?.registered === true,
+        weight: t?.weight && typeof t.weight === "object" ? (t.weight as WeightSpec) : null,
+        topFeatures: arr(t?.top_features).map((f: J) => ({
+          feature: str(f?.feature),
+          count: num(f?.count),
+        })),
+      }),
+    ),
+    nextCursor: strOrNull(r?.next_cursor),
+    totalTypes: num(r?.total_types),
+    eventsScanned: num(r?.events_scanned),
+    totalEvents: num(r?.total_events),
+    truncated: r?.truncated === true,
+  };
+}
+
+export function decodeOccurrences(r: J): OccurrencePage {
+  return {
+    occurrences: arr(r?.occurrences).map(
+      (o: J): OccurrenceInfo => ({
+        effect: str(o?.effect),
+        entity: str(o?.entity),
+        at: num(o?.at),
+        sources: arr(o?.sources).map((x: J) => str(x)),
+        confirmedEventId: numOrNull(o?.confirmed_event_id),
+        rejected: num(o?.rejected),
+      }),
+    ),
+    nextCursor: strOrNull(r?.next_cursor),
+    truncated: r?.truncated === true,
   };
 }

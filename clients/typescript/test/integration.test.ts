@@ -45,6 +45,18 @@ describe.skipIf(!url)("integration (HEAPDB_TEST_URL)", () => {
     const links = await db.linkReport({ effect: "bloating", entity });
     expect(links.rows.some((r) => r.feature === "beans")).toBe(true);
 
+    // Catalog: what the database holds.
+    const effects = await db.effects();
+    expect(effects.effects.map((e) => e.name)).toContain("bloating");
+    const ents = await db.entities({ prefix: entity });
+    expect(ents.entities.map((e) => e.name)).toEqual([entity]);
+    expect(ents.entities[0]!.eventCount).toBe(2);
+    const types = await db.eventTypes({ features: 5 });
+    expect(types.eventTypes.find((t) => t.type === "meal")?.count).toBeGreaterThanOrEqual(2);
+    const occ = await db.occurrences({ effect: "bloating", entity });
+    expect(occ.occurrences.map((o) => [o.at, o.sources])).toEqual([[15 * H, ["feedback"]]]);
+    expect(occ.nextCursor).toBeNull();
+
     const counts = await db.forgetEntity(entity);
     expect(Object.keys(counts).length).toBeGreaterThan(0);
   });

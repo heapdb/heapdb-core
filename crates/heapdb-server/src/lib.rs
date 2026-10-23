@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod catalog;
 pub mod config;
 pub mod database;
 pub mod error;

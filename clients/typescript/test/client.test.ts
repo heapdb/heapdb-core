@@ -736,3 +736,158 @@ describe("package", () => {
     expect(VERSION).toBe(pkg.version);
   });
 });
+
+describe("catalog", () => {
+  it("effects -> GET /effects, decoded and paged", async () => {
+    const { db, calls } = client([
+      json({
+        effects: [
+          {
+            name: "error_spike",
+            kernel: {
+              type: "lognormal",
+              params: { median: 2700, sigma: 0.7, tail_sigmas: 4 },
+              human: { median_s: 2700, sigma: 0.7, peak_s: 1654, max_lag_s: 44400 },
+              text: "typical lag 45m, looks back up to 12h 20m",
+            },
+            credit: "proportional",
+            combine: "noisy_or",
+            logistic: null,
+            cause_types: ["deploy"],
+            priors: {
+              count: 1,
+              default: [1, 4],
+              top: [{ feature: "migration", alpha: 3, beta: 1, strength: 0.75 }],
+            },
+            rules: [],
+            hierarchical: true,
+            global_pseudocount: 5,
+            leak: "Infinity",
+            w_neg: 1,
+            repeatable: true,
+            counts: { occurrences: 2, feedback_confirmed: 1 },
+            future_field: 1,
+          },
+        ],
+        next_cursor: "6162",
+        total_effects: 3,
+      }),
+      json({
+        effects: [
+          {
+            name: "churn",
+            kernel: { type: "exponential", params: { half_life: 60 }, human: {}, text: "" },
+            credit: "uniform",
+            combine: "logistic",
+            logistic: { learning_rate: 0.5, l2: 1, base_log_odds: -1.39 },
+            cause_types: null,
+            priors: { count: 0, default: [1, 4], top: [] },
+            rules: [],
+            hierarchical: true,
+            global_pseudocount: 5,
+            leak: 0.05,
+            w_neg: 1,
+            repeatable: true,
+            counts: {},
+          },
+        ],
+        next_cursor: null,
+        total_effects: 3,
+      }),
+    ]);
+    const page = await db.effects();
+    expect(calls[0]!.method).toBe("GET");
+    expect(calls[0]!.url).toBe(`${BASE}/effects`);
+    expect(page.nextCursor).toBe("6162");
+    expect(page.totalEffects).toBe(3);
+    const e = page.effects[0]!;
+    expect(e.name).toBe("error_spike");
+    expect(e.kernel.human.max_lag_s).toBe(44400);
+    expect(e.causeTypes).toEqual(["deploy"]);
+    expect(e.priors.top[0]!.feature).toBe("migration");
+    expect(e.counts).toEqual({ occurrences: 2, feedbackConfirmed: 1 });
+    expect([e.combine, e.logistic, e.leak, e.wNeg]).toEqual(["noisy_or", null, Infinity, 1]);
+    const next = await db.effects({ limit: 1, cursor: "6162" });
+    expect(calls[1]!.url).toBe(`${BASE}/effects?limit=1&cursor=6162`);
+    expect(next.nextCursor).toBeNull();
+    const c = next.effects[0]!;
+    expect([c.combine, c.credit, c.causeTypes]).toEqual(["logistic", "uniform", null]);
+    expect(c.logistic).toEqual({ learningRate: 0.5, l2: 1, baseLogOdds: -1.39 });
+  });
+
+  it("entities, eventTypes and occurrences pass query params", async () => {
+    const { db, calls } = client([
+      json({
+        entities: [{ name: "acme/web", event_count: 3, first_event_time: 1, last_event_time: 9 }],
+        next_cursor: "abc",
+        matched: 4,
+        scanned: 10,
+        total_entities: 10,
+        truncated: false,
+      }),
+      json({
+        event_types: [
+          {
+            type: "merge",
+            count: 5,
+            last_event_time: 9,
+            registered: true,
+            weight: { kind: "attr", attr: "lines" },
+            top_features: [{ feature: "config", count: 3 }],
+          },
+        ],
+        next_cursor: "1",
+        total_types: 2,
+        events_scanned: 5,
+        total_events: 5,
+        truncated: false,
+      }),
+      json({
+        occurrences: [
+          {
+            effect: "incident",
+            entity: "checkout",
+            at: 100,
+            sources: ["observe"],
+            confirmed_event_id: null,
+            rejected: 0,
+          },
+        ],
+        next_cursor: "40590000.6368",
+        truncated: false,
+      }),
+      json({ entities: [], next_cursor: null }),
+      json({ occurrences: [], next_cursor: null, truncated: true }),
+    ]);
+    const page = await db.entities({ prefix: "acme/", limit: 2, cursor: "xyz" });
+    expect(calls[0]!.url).toBe(`${BASE}/entities?prefix=acme%2F&limit=2&cursor=xyz`);
+    expect(page).toEqual({
+      entities: [{ name: "acme/web", eventCount: 3, firstEventTime: 1, lastEventTime: 9 }],
+      nextCursor: "abc",
+      matched: 4,
+      totalEntities: 10,
+      truncated: false,
+    });
+    const et = await db.eventTypes({ features: 5, limit: 1, cursor: "0" });
+    expect(calls[1]!.url).toBe(`${BASE}/event-types?features=5&limit=1&cursor=0`);
+    expect(et.eventTypes[0]!.topFeatures).toEqual([{ feature: "config", count: 3 }]);
+    expect(et.eventTypes[0]!.weight).toEqual({ kind: "attr", attr: "lines" });
+    expect([et.nextCursor, et.totalTypes, et.totalEvents]).toEqual(["1", 2, 5]);
+    const occ = await db.occurrences({ effect: "incident", limit: 3 });
+    expect(calls[2]!.url).toBe(`${BASE}/occurrences?effect=incident&limit=3`);
+    expect(occ.occurrences[0]).toEqual({
+      effect: "incident",
+      entity: "checkout",
+      at: 100,
+      sources: ["observe"],
+      confirmedEventId: null,
+      rejected: 0,
+    });
+    expect(occ.nextCursor).toBe("40590000.6368");
+    await db.entities();
+    expect(calls[3]!.url).toBe(`${BASE}/entities`);
+    const more = await db.occurrences({ cursor: "40590000.6368" });
+    expect(calls[4]!.url).toBe(`${BASE}/occurrences?cursor=40590000.6368`);
+    expect(more).toEqual({ occurrences: [], nextCursor: null, truncated: true });
+  });
+});
