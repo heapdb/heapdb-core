@@ -5,7 +5,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use heapdb::{Attrs, BoxError, Credit, EffectOptions, EventRef, Kernel, Predicate, WeightFn};
+use heapdb::{Attrs, BoxError, Combine, Credit, EffectOptions, EventRef, Kernel, Predicate, WeightFn};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -64,9 +64,20 @@ pub struct EffectReq {
     /// Only these event types can be causes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cause_types: Option<Vec<String>>,
-    /// `proportional` (default) or `uniform`.
+    /// `proportional` or `uniform` (default: `proportional` for
+    /// `noisy_or`, `uniform` for `logistic`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credit: Option<String>,
+    /// How features combine into the link: `noisy_or` (default) or
+    /// `logistic`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub combine: Option<String>,
+    /// Logistic learning rate (FTRL alpha, default 0.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub learning_rate: Option<f64>,
+    /// Logistic L2 penalty towards the prior seeds (default 1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub l2: Option<f64>,
     /// Global-layer pseudocount (default 5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub global_pseudocount: Option<f64>,
@@ -146,7 +157,16 @@ impl EffectReq {
             o.cause_types = Some(c.clone());
         }
         if let Some(c) = &self.credit {
-            o.credit = Credit::parse(c)?;
+            o.credit = Some(Credit::parse(c)?);
+        }
+        if let Some(c) = &self.combine {
+            o.combine = Combine::parse(c)?;
+        }
+        if let Some(lr) = self.learning_rate {
+            o.logistic.learning_rate = lr;
+        }
+        if let Some(l2) = self.l2 {
+            o.logistic.l2 = l2;
         }
         if let Some(g) = self.global_pseudocount {
             o.global_pseudocount = g;

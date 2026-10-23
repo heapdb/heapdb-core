@@ -7,6 +7,10 @@
 //! * `settle(until)`: events whose kernel window passed without the effect
 //!   get negative evidence `beta_f += w_neg * rules(e)`; incremental through
 //!   per-(entity, effect) cursors.
+//! * Under `combine = logistic` the same evidence also trains the weights:
+//!   `observe` is a positive example per event weighted by `r_e`, `settle`
+//!   a negative one weighted by the evidence added (see
+//!   [`crate::logistic`]).
 //! * `link_report(effect)`: features ranked by learned strength, with Beta
 //!   credible intervals and lift. **Associations under the model, not
 //!   causal effects.**
@@ -161,12 +165,18 @@ impl HeapDB {
         for (sc, names) in scored.iter().zip(names) {
             let r = sc.score / total;
             let undo = spec.obs.rejected.remove(&sc.id).unwrap_or(0.0);
+            let mut sorted = sc.feats.clone();
+            sorted.sort_unstable();
             if undo != 0.0 {
                 for &f in &sc.feats {
                     spec.links.update(f, 0.0, -undo, eid);
                 }
+                // Logistic: take back the negative example `settle` added.
+                spec.links.logistic_step(&sorted, 0.0, -undo, eid);
                 spec.obs.bump("rejections_undone", 1.0);
             }
+            // Logistic: a positive example weighted by its responsibility.
+            spec.links.logistic_step(&sorted, 1.0, r, eid);
             let mut added = Vec::with_capacity(names.len());
             for (&(f, sh), name) in sc.by_name.iter().zip(names) {
                 spec.links.update(f, r * sh, r * (1.0 - sh), eid);
@@ -224,7 +234,7 @@ impl HeapDB {
         if k == 0.0 {
             return Ok(0.0);
         }
-        let mut s = k * ev.weight * spec.links.noisy_or_cached(log.feats(ev), cache);
+        let mut s = k * ev.weight * spec.links.link_cached(log.feats(ev), cache);
         if spec.rules.is_empty() {
             return Ok(s);
         }
@@ -386,6 +396,9 @@ impl HeapDB {
                     for &f in log.feats(ev) {
                         spec.links.update(f, 0.0, w, Some(eid));
                     }
+                    let mut sorted = log.feats(ev).to_vec();
+                    sorted.sort_unstable();
+                    spec.links.logistic_step(&sorted, 0.0, w, Some(eid));
                     spec.obs.rejected.insert(ev.id, target);
                     w_total += w;
                     spec.obs.bump("rejected_weight", w);
@@ -486,6 +499,7 @@ impl HeapDB {
                 .into_iter()
                 .map(|(feature, strength, alpha, beta, n, lo, hi)| LinkRow {
                     lift: if lift_ok { strength / base } else { f64::NAN },
+                    log_odds: links.weight(self.vocab.features.get(&feature)),
                     feature,
                     strength,
                     alpha,

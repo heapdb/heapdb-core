@@ -7,8 +7,12 @@
 //! event `e` of `x` (time `t`, weight `w`, features `F`, type `y`):
 //!
 //! ```text
-//! score(e | E) = kernel_E(T - t) * w * noisy_or_{f in F}(strength_x(f, E)) * rules_E(e)
+//! score(e | E) = kernel_E(T - t) * w * link_E(F) * rules_E(e)
 //! ```
+//!
+//! `link_E(F)` is `noisy_or_{f in F}(strength_x(f, E))` (default) or, for an
+//! effect registered with `combine = logistic`, `sigmoid(b + sum_f w_f)`
+//! (see [`crate::logistic`]).
 //!
 //! # Top-k query (threshold-algorithm style)
 //!
@@ -16,8 +20,9 @@
 //! 2. Each segment gets an upper bound on the score of *any* of its events,
 //!    from its summaries and the *current* links: the kernel maximum over
 //!    the segment's lag range times the max over its distinct
-//!    `(type, feature set)` keys of `max_weight * noisy_or * rule_bound`
-//!    (or the looser union bound when the segment tracks too many keys).
+//!    `(type, feature set)` keys of `max_weight * link * rule_bound`
+//!    (or the looser union bound when the segment tracks too many keys:
+//!    noisy-OR of all its features, or `sigmoid(b + sum max(0, w_f))`).
 //! 3. Segments are visited best-bound-first, scoring events into a bounded
 //!    min-heap of size `k`; as soon as the heap is full and its minimum is
 //!    `>=` the next bound, the scan stops.
@@ -36,7 +41,8 @@ use crate::error::{Error, Result};
 use crate::event::{validate_weight, Attrs, Event, EventRef, Features, EMPTY_ATTRS};
 use crate::intern::Vocab;
 use crate::kernels::Kernel;
-use crate::links::{BetaCounts, Credit, EntityId, EntityRef, FeatureId, LinkTable, StrengthCache};
+use crate::links::{BetaCounts, Combine, Credit, EntityId, EntityRef, FeatureId, LinkTable, StrengthCache};
+use crate::logistic::LogisticParams;
 use crate::pyfmt::{repr_f64, repr_str, repr_str_list};
 use crate::results::*;
 use crate::rules::{Predicate, Rule, WeightFn};
@@ -155,6 +161,14 @@ impl EffectSpec {
     pub fn credit(&self) -> Credit {
         self.credit
     }
+    /// How features are combined into the link.
+    pub fn combine(&self) -> Combine {
+        self.links.combine()
+    }
+    /// Logistic hyperparameters (`None` under `noisy_or`).
+    pub fn logistic_params(&self) -> Option<LogisticParams> {
+        self.links.logistic().map(|l| l.params())
+    }
     /// Change the credit mode.
     pub fn set_credit(&mut self, c: Credit) {
         self.credit = c;
@@ -255,8 +269,13 @@ pub struct EffectOptions {
     pub default_prior: (f64, f64),
     /// Restrict causes to these event types (`None` or empty: any).
     pub cause_types: Option<Vec<String>>,
-    /// Credit mode for confirmations.
-    pub credit: Credit,
+    /// Credit mode for confirmations (`None`: the combine mode's default,
+    /// [`Combine::default_credit`]).
+    pub credit: Option<Credit>,
+    /// How features are combined into the link (default `noisy_or`).
+    pub combine: Combine,
+    /// Hyperparameters of the `logistic` combine mode (ignored otherwise).
+    pub logistic: LogisticParams,
     /// Cap on pseudo-observations borrowed from the global layer.
     pub global_pseudocount: f64,
     /// Borrow from the global layer at all.
@@ -277,7 +296,9 @@ impl EffectOptions {
             priors: Vec::new(),
             default_prior: (1.0, 4.0),
             cause_types: None,
-            credit: Credit::Proportional,
+            credit: None,
+            combine: Combine::NoisyOr,
+            logistic: LogisticParams::default(),
             global_pseudocount: 5.0,
             hierarchical: true,
             leak: DEFAULT_LEAK,
@@ -302,7 +323,22 @@ impl EffectOptions {
     }
     /// Set the credit mode.
     pub fn credit(mut self, c: Credit) -> Self {
-        self.credit = c;
+        self.credit = Some(c);
+        self
+    }
+    /// Set the combine mode.
+    pub fn combine(mut self, c: Combine) -> Self {
+        self.combine = c;
+        self
+    }
+    /// Set the logistic learning rate (FTRL `alpha`, > 0).
+    pub fn learning_rate(mut self, lr: f64) -> Self {
+        self.logistic.learning_rate = lr;
+        self
+    }
+    /// Set the logistic L2 penalty towards the seeds (>= 0).
+    pub fn l2(mut self, l2: f64) -> Self {
+        self.logistic.l2 = l2;
         self
     }
     /// Set the global pseudocount.
@@ -621,6 +657,9 @@ impl HeapDB {
         let leak = check_leak(opts.leak)?;
         let w_neg = check_w_neg(opts.w_neg)?;
         let mut links = LinkTable::new(opts.default_prior, opts.global_pseudocount, opts.hierarchical)?;
+        if opts.combine == Combine::Logistic {
+            links.set_combine(Combine::Logistic, Some(opts.logistic))?;
+        }
         for (f, (a, b)) in &opts.priors {
             let id = self.vocab.features.intern(f);
             links.set_prior(id, f, *a, *b)?;
@@ -639,7 +678,7 @@ impl HeapDB {
             cause_types,
             cause_type_ids,
             rules: Vec::new(),
-            credit: opts.credit,
+            credit: opts.credit.unwrap_or(opts.combine.default_credit()),
             pending_rules: Vec::new(),
             leak,
             w_neg,
@@ -1001,7 +1040,7 @@ impl HeapDB {
             return Ok(0.0);
         }
         let feats = log.feats(ev);
-        let mut s = k * ev.weight * spec.links.noisy_or_cached(feats, cache);
+        let mut s = k * ev.weight * spec.links.link_cached(feats, cache);
         if spec.rules.is_empty() {
             return Ok(s);
         }
@@ -1025,8 +1064,9 @@ impl HeapDB {
         Ok(s)
     }
 
-    fn noisy_or_probe(&self, spec: &EffectSpec, p: &Probe<'_>, ent: EntityRef) -> f64 {
-        spec.links.noisy_or_opt(&p.feats, ent)
+    /// The link of a probe under the effect's combine mode.
+    fn link_probe(&self, spec: &EffectSpec, p: &Probe<'_>, ent: EntityRef) -> f64 {
+        spec.links.link_opt(&p.feats, ent)
     }
 
     /// Score of an event for an effect at time `at` (the event need not be
@@ -1046,7 +1086,7 @@ impl HeapDB {
             return Ok(0.0);
         }
         let ent = EntityRef::Entity(self.vocab.entities.get(&event.entity));
-        let mut s = k * p.weight * self.noisy_or_probe(spec, &p, ent);
+        let mut s = k * p.weight * self.link_probe(spec, &p, ent);
         let evref = p.evref();
         for r in &spec.rules {
             if s == 0.0 {
@@ -1071,18 +1111,23 @@ impl HeapDB {
             .names
             .iter()
             .map(|n| {
-                let c = spec.links.get(self.vocab.features.get(n), ent);
+                let id = self.vocab.features.get(n);
+                let c = spec.links.get(id, ent);
                 FeatureContribution {
                     feature: n.clone(),
                     strength: c.strength(),
                     alpha: c.alpha(),
                     beta: c.beta(),
+                    log_odds: spec.links.weight(id),
                 }
             })
             .collect();
+        // Strongest first: by link strength (noisy-OR) or by the log-odds
+        // multiplier (logistic), then by name.
+        let key = |c: &FeatureContribution| c.log_odds.unwrap_or(c.strength);
         out.sort_by(|a, b| {
-            b.strength
-                .partial_cmp(&a.strength)
+            key(b)
+                .partial_cmp(&key(a))
                 .unwrap_or(Ordering::Equal)
                 .then_with(|| a.feature.cmp(&b.feature))
         });
@@ -1111,8 +1156,9 @@ impl HeapDB {
             dt,
             kernel_value: if dt >= 0.0 { spec.kernel.value(dt) } else { 0.0 },
             weight: p.weight,
-            link_strength: self.noisy_or_probe(spec, p, ent),
+            link_strength: self.link_probe(spec, p, ent),
             features: self.contributions(spec, p, ent),
+            base_log_odds: spec.links.base_log_odds(),
             warnings: self.confounding_warnings(spec, p, &groups),
             rules: self.applied_rules(spec, p)?,
             joint_causes: self.joint_causes(spec, p, &groups),
@@ -1185,7 +1231,7 @@ impl HeapDB {
             }
             out.push(JointCause {
                 features: g.names.clone(),
-                strength: spec.links.noisy_or_opt(&g.ids, ent),
+                strength: spec.links.link_opt(&g.ids, ent),
                 joint,
                 inseparable: true,
             });
@@ -1204,7 +1250,7 @@ impl HeapDB {
                 let opt: Vec<Option<FeatureId>> = fs.iter().copied().map(Some).collect();
                 out.push(JointCause {
                     features: names,
-                    strength: spec.links.noisy_or_opt(&opt, ent),
+                    strength: spec.links.link_opt(&opt, ent),
                     joint: spec.links.joint(e, fs),
                     inseparable: false,
                 });
@@ -1577,7 +1623,7 @@ impl HeapDB {
         if type_given && !spec.type_allowed_id(p.ty) {
             return Ok(0.0);
         }
-        let mut s = p.weight * self.noisy_or_probe(spec, p, ent);
+        let mut s = p.weight * self.link_probe(spec, p, ent);
         let evref = p.evref();
         for r in &spec.rules {
             if s == 0.0 {
@@ -1622,8 +1668,9 @@ impl HeapDB {
             dt: 0.0,
             kernel_value: 1.0,
             weight: p.weight,
-            link_strength: self.noisy_or_probe(spec, p, ent),
+            link_strength: self.link_probe(spec, p, ent),
             features: self.contributions(spec, p, ent),
+            base_log_odds: spec.links.base_log_odds(),
             warnings,
             rules,
             joint_causes: joint,
@@ -1740,11 +1787,15 @@ impl HeapDB {
 
     /// Teach the database which candidate really was the cause.
     ///
-    /// Confirmed event: proportional (EM) credit by default (or `credit` /
-    /// the effect's credit mode); rejected events: `beta += 1` per feature.
-    /// Updates go to the entity and the global layer; inseparable groups get
-    /// a joint link; the pre-update scores are recorded for calibration.
-    /// Everything is validated before anything changes.
+    /// Confirmed event: Beta credit per `credit` (default: the effect's credit
+    /// mode: proportional / EM under noisy-OR, uniform under logistic);
+    /// rejected events: `beta += 1` per feature. Updates go to the entity and
+    /// the global layer; inseparable groups get a joint link; the pre-update
+    /// scores are recorded for calibration. Under `combine = logistic` the
+    /// weights also take one example per judged event: the confirmed one
+    /// first (label 1), then the rejected ones in the given order (label 0);
+    /// see [`crate::logistic`]. Everything is validated before anything
+    /// changes.
     pub fn feedback(
         &mut self,
         entity: &str,
@@ -1817,9 +1868,9 @@ impl HeapDB {
         if let Some(c) = &conf {
             let p = self.event_probe(c);
             let groups = self.inseparable_groups(&p);
-            let p_all = self.noisy_or_probe(spec, &p, ent);
+            let p_all = self.link_probe(spec, &p, ent);
             for g in &groups {
-                let gp = spec.links.noisy_or_opt(&g.ids, ent);
+                let gp = spec.links.link_opt(&g.ids, ent);
                 let r = if mode == Credit::Uniform || p_all <= 0.0 {
                     1.0
                 } else {
@@ -1829,6 +1880,11 @@ impl HeapDB {
             }
             confirm_ids = Some(ids_by_name(self, c));
         }
+        let logistic_confirm: Option<Vec<FeatureId>> = confirm_ids.as_ref().map(|ids| {
+            let mut v = ids.clone();
+            v.sort_unstable();
+            v
+        });
         let mut reject_plan: Vec<(Vec<Vec<FeatureId>>, Vec<FeatureId>)> = Vec::new();
         for r in &rej {
             let p = self.event_probe(r);
@@ -1863,6 +1919,18 @@ impl HeapDB {
                 links.update_joint(eid, fs, 0.0, 1.0);
             }
             links.reject(ids, Some(eid));
+        }
+        // Logistic weights: one example per judged event, the confirmed one
+        // first (label 1), then the rejected ones in the given order.
+        if links.combine() == Combine::Logistic {
+            if let Some(ids) = &logistic_confirm {
+                links.logistic_step(ids, 1.0, 1.0, Some(eid));
+            }
+            for (_, ids) in &reject_plan {
+                let mut ids = ids.clone();
+                ids.sort_unstable();
+                links.logistic_step(&ids, 0.0, 1.0, Some(eid));
+            }
         }
         Ok(FeedbackReport {
             confirmed: conf.map(|c| c.id),
@@ -2021,7 +2089,7 @@ pub(crate) fn bound(
                 if w * rb <= best {
                     continue;
                 }
-                let lk = spec.links.noisy_or_cached(log.key_feats(key), cache);
+                let lk = spec.links.link_cached(log.key_feats(key), cache);
                 let v = w * lk * rb;
                 if v > best {
                     best = v;
@@ -2041,11 +2109,10 @@ pub(crate) fn bound(
             any = true;
         }
     }
-    let mut buf = crate::links::SmallF64::new();
-    for &(f, _) in &seg.feature_counts {
-        buf.push(spec.links.strength_cached(f, cache));
-    }
-    (kb * seg.max_weight * rb * buf.noisy_or(), true)
+    let lk = spec
+        .links
+        .link_upper_bound(seg.feature_counts.iter().map(|&(f, _)| f), cache);
+    (kb * seg.max_weight * rb * lk, true)
 }
 
 pub(crate) fn check_leak(leak: f64) -> Result<f64> {

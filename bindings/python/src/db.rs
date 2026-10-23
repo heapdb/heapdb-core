@@ -76,6 +76,10 @@ fn credit_arg(c: &str) -> PyResult<Credit> {
     Credit::parse(c).map_err(err)
 }
 
+fn combine_arg(c: &str) -> PyResult<heapdb::Combine> {
+    heapdb::Combine::parse(c).map_err(err)
+}
+
 fn opt_str_set(py: Python<'_>, s: Option<&BTreeSet<String>>) -> PyResult<Py<PyAny>> {
     Ok(match s {
         None => py.None(),
@@ -557,6 +561,37 @@ impl PyLinkTable {
         Ok(d)
     }
 
+    /// ``"noisy_or"`` or ``"logistic"``.
+    #[getter]
+    fn combine(&self, py: Python<'_>) -> PyResult<&'static str> {
+        self.read(py, |_, t| Ok(t.combine().as_str()))
+    }
+
+    /// Logistic intercept (base log-odds); None under noisy-OR.
+    #[getter]
+    fn base_log_odds(&self, py: Python<'_>) -> PyResult<Option<f64>> {
+        self.read(py, |_, t| Ok(t.base_log_odds()))
+    }
+
+    /// Logistic weight (log-odds multiplier) of a feature; None under noisy-OR.
+    fn weight(&self, py: Python<'_>, feature: &str) -> PyResult<Option<f64>> {
+        self.read(py, |v, t| Ok(t.weight(v.features.get(feature))))
+    }
+
+    /// Link of a feature set under the effect's combine mode (noisy-OR of
+    /// the strengths, or ``sigmoid(base + sum of weights)``).
+    #[pyo3(signature = (features, entity = None))]
+    fn link(&self, py: Python<'_>, features: &Bound<'_, PyAny>, entity: Option<&str>) -> PyResult<f64> {
+        let mut names = str_list(features)?;
+        names.sort();
+        names.dedup();
+        self.read(py, |v, t| {
+            let ids: Vec<Option<heapdb::links::FeatureId>> =
+                names.iter().map(|n| v.features.get(n)).collect();
+            Ok(t.link_opt(&ids, ent_ref(v, entity)))
+        })
+    }
+
     /// Aggregate (noisy-OR) strength of a feature set.
     #[pyo3(signature = (features, entity = None))]
     fn noisy_or(&self, py: Python<'_>, features: &Bound<'_, PyAny>, entity: Option<&str>) -> PyResult<f64> {
@@ -850,6 +885,21 @@ impl PyEffectSpec {
     fn credit(&self, py: Python<'_>) -> PyResult<&'static str> {
         self.with(py, |_, s| Ok(s.credit().as_str()))
     }
+    /// ``"noisy_or"`` or ``"logistic"``.
+    #[getter]
+    fn combine(&self, py: Python<'_>) -> PyResult<&'static str> {
+        self.with(py, |_, s| Ok(s.combine().as_str()))
+    }
+    /// Logistic learning rate (None under noisy-OR).
+    #[getter]
+    fn learning_rate(&self, py: Python<'_>) -> PyResult<Option<f64>> {
+        self.with(py, |_, s| Ok(s.logistic_params().map(|p| p.learning_rate)))
+    }
+    /// Logistic L2 penalty towards the prior seeds (None under noisy-OR).
+    #[getter]
+    fn l2(&self, py: Python<'_>) -> PyResult<Option<f64>> {
+        self.with(py, |_, s| Ok(s.logistic_params().map(|p| p.l2)))
+    }
     #[setter]
     fn set_credit(&self, py: Python<'_>, c: &str) -> PyResult<()> {
         let c = credit_arg(c)?;
@@ -921,8 +971,17 @@ impl PyEffectSpec {
     }
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         self.with(py, |_, s| {
+            // `combine=` only for logistic effects (noisy-OR reprs unchanged).
+            let combine = match s.logistic_params() {
+                None => String::new(),
+                Some(p) => format!(
+                    ", combine='logistic', learning_rate={}, l2={}",
+                    heapdb::pyfmt::repr_f64(p.learning_rate),
+                    heapdb::pyfmt::repr_f64(p.l2)
+                ),
+            };
             Ok(format!(
-                "EffectSpec(name={}, kernel={}, credit={}, rules={}, leak={}, w_neg={}, repeatable={})",
+                "EffectSpec(name={}, kernel={}, credit={}{combine}, rules={}, leak={}, w_neg={}, repeatable={})",
                 heapdb::pyfmt::repr_str(s.name()),
                 s.kernel().repr(),
                 heapdb::pyfmt::repr_str(s.credit().as_str()),
@@ -1253,8 +1312,9 @@ impl PyHeapDB {
 
     /// Declare an effect type, its lag kernel and its link priors.
     #[pyo3(signature = (name, kernel, priors = None, default_prior = (1.0, 4.0), cause_types = None,
-                        credit = "proportional", global_pseudocount = 5.0, hierarchical = None,
-                        leak = None, w_neg = None, repeatable = None))]
+                        credit = None, global_pseudocount = 5.0, hierarchical = None,
+                        leak = None, w_neg = None, repeatable = None, combine = "noisy_or",
+                        learning_rate = None, l2 = None))]
     #[allow(clippy::too_many_arguments)]
     fn register_effect(
         slf: &Bound<'_, Self>,
@@ -1263,16 +1323,26 @@ impl PyHeapDB {
         priors: Option<&Bound<'_, PyAny>>,
         default_prior: (f64, f64),
         cause_types: Option<&Bound<'_, PyAny>>,
-        credit: &str,
+        credit: Option<&str>,
         global_pseudocount: f64,
         hierarchical: Option<&Bound<'_, PyAny>>,
         leak: Option<&Bound<'_, PyAny>>,
         w_neg: Option<&Bound<'_, PyAny>>,
         repeatable: Option<&Bound<'_, PyAny>>,
+        combine: &str,
+        learning_rate: Option<f64>,
+        l2: Option<f64>,
     ) -> PyResult<PyEffectSpec> {
         let py = slf.py();
         let mut opts = EffectOptions::new(kernel.inner.clone());
-        opts.credit = credit_arg(credit)?;
+        opts.credit = credit.map(credit_arg).transpose()?;
+        opts.combine = combine_arg(combine)?;
+        if let Some(lr) = learning_rate {
+            opts.logistic.learning_rate = lr;
+        }
+        if let Some(l) = l2 {
+            opts.logistic.l2 = l;
+        }
         if let Some(l) = leak {
             opts.leak = py_float(l)?;
         }

@@ -6,8 +6,12 @@
 //! explained:
 //!
 //! ```text
-//! score(event | effect) = kernel(dt) x weight x noisy_OR_f(strength(f, effect)) x rules
+//! score(event | effect) = kernel(dt) x weight x link(features, effect) x rules
 //! ```
+//!
+//! where the link combines the features' evidence with noisy-OR
+//! (`1 - prod(1 - strength_f)`, the default) or, per effect, logistically
+//! (`sigmoid(b + sum_f w_f)`, see [`logistic`]).
 //!
 //! * [`Kernel`]: how plausible is a cause `dt` seconds before the effect.
 //! * weight: the dose / exposure of the event.
@@ -43,6 +47,7 @@ pub mod forward_decay;
 pub mod intern;
 pub mod kernels;
 pub mod links;
+pub mod logistic;
 pub mod observe;
 pub mod pyfmt;
 pub mod query;
@@ -58,7 +63,8 @@ pub use error::{BoxError, Error, ErrorKind, Result};
 pub use event::{Attrs, Event, EventRef, Features};
 pub use forward_decay::{ForwardDecayHeap, Popped};
 pub use kernels::{Kernel, KernelShape};
-pub use links::{noisy_or, responsibilities, BetaCounts, Credit, EntityRef, LinkTable};
+pub use links::{noisy_or, responsibilities, BetaCounts, Combine, Credit, EntityRef, LinkTable};
+pub use logistic::{sigmoid, LogisticParams};
 pub use observe::{Baseline, LinkReportOptions};
 pub use query::{execute, parse, Output, Statement};
 pub use results::*;

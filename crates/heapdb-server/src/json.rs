@@ -94,7 +94,13 @@ pub fn beta(b: &BetaCounts) -> Value {
 }
 
 fn contribution(c: &FeatureContribution) -> Value {
-    json!({"feature": c.feature, "strength": num(c.strength), "alpha": num(c.alpha), "beta": num(c.beta)})
+    let mut v = json!({"feature": c.feature, "strength": num(c.strength), "alpha": num(c.alpha), "beta": num(c.beta)});
+    // Logistic only (noisy-OR explanations keep their exact shape).
+    if let (Some(w), Value::Object(m)) = (c.log_odds, &mut v) {
+        m.insert("log_odds".into(), num(w));
+        m.insert("odds_multiplier".into(), num(w.exp()));
+    }
+    v
 }
 
 fn applied_rule(r: &AppliedRule) -> Value {
@@ -113,7 +119,7 @@ fn joint_cause(j: &JointCause) -> Value {
 
 /// An explanation (`kernel x weight x link x rules`).
 pub fn explanation(e: &Explanation) -> Value {
-    json!({
+    let mut v = json!({
         "dt": num(e.dt),
         "kernel_value": num(e.kernel_value),
         "weight": num(e.weight),
@@ -128,7 +134,16 @@ pub fn explanation(e: &Explanation) -> Value {
         "score": num(e.score()),
         "inseparable": e.inseparable(),
         "text": e.to_string(),
-    })
+    });
+    // Logistic only: base odds x multiplier per feature = odds -> link.
+    if let (Some(b), Some(z), Value::Object(m)) = (e.base_log_odds, e.log_odds(), &mut v) {
+        m.insert("combine".into(), e.combine().into());
+        m.insert("base_log_odds".into(), num(b));
+        m.insert("base_odds".into(), num(b.exp()));
+        m.insert("log_odds".into(), num(z));
+        m.insert("odds".into(), num(z.exp()));
+    }
+    v
 }
 
 fn opt_explanation(e: &Option<Explanation>) -> Option<Value> {
@@ -252,16 +267,22 @@ pub fn link_report(r: &LinkReport) -> Value {
         "entity": r.entity,
         "baseline": num(r.baseline),
         "level": num(r.level),
-        "rows": r.rows.iter().map(|x| json!({
-            "feature": x.feature,
-            "strength": num(x.strength),
-            "alpha": num(x.alpha),
-            "beta": num(x.beta),
-            "n": num(x.n),
-            "lo": num(x.lo),
-            "hi": num(x.hi),
-            "lift": num(x.lift),
-        })).collect::<Vec<_>>(),
+        "rows": r.rows.iter().map(|x| {
+            let mut v = json!({
+                "feature": x.feature,
+                "strength": num(x.strength),
+                "alpha": num(x.alpha),
+                "beta": num(x.beta),
+                "n": num(x.n),
+                "lo": num(x.lo),
+                "hi": num(x.hi),
+                "lift": num(x.lift),
+            });
+            if let (Some(w), Value::Object(m)) = (x.log_odds, &mut v) {
+                m.insert("log_odds".into(), num(w));
+            }
+            v
+        }).collect::<Vec<_>>(),
         "text": r.to_string(),
     })
 }

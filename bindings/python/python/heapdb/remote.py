@@ -298,6 +298,11 @@ class FeatureContribution:
     strength: float
     alpha: float
     beta: float
+    log_odds: float | None = None    # logistic only
+
+    @property
+    def odds_multiplier(self) -> float | None:
+        return None if self.log_odds is None else math.exp(self.log_odds)
 
 
 @dataclass(frozen=True)
@@ -331,6 +336,26 @@ class Explanation:
     entity: str
     prospective: bool
     text: str = field(default="", repr=False, compare=False)
+    base_log_odds: float | None = None    # logistic only
+
+    @property
+    def combine(self) -> str:
+        return "noisy_or" if self.base_log_odds is None else "logistic"
+
+    @property
+    def log_odds(self) -> float | None:
+        if self.base_log_odds is None:
+            return None
+        return self.base_log_odds + math.fsum(c.log_odds or 0.0 for c in self.features)
+
+    @property
+    def base_odds(self) -> float | None:
+        return None if self.base_log_odds is None else math.exp(self.base_log_odds)
+
+    @property
+    def odds(self) -> float | None:
+        z = self.log_odds
+        return None if z is None else math.exp(z)
 
     @property
     def rule_multiplier(self) -> float:
@@ -357,13 +382,15 @@ class Explanation:
         return cls(
             dt=_f(d["dt"]), kernel_value=_f(d["kernel_value"]), weight=_f(d["weight"]),
             link_strength=_f(d["link_strength"]),
-            features=tuple(FeatureContribution(c["feature"], _f(c["strength"]), _f(c["alpha"]), _f(c["beta"]))
+            features=tuple(FeatureContribution(c["feature"], _f(c["strength"]), _f(c["alpha"]), _f(c["beta"]),
+                                               _fo(c.get("log_odds")))
                            for c in d.get("features", ())),
             warnings=tuple(d.get("warnings", ())),
             rules=tuple(AppliedRule(r["name"], _f(r["multiplier"])) for r in d.get("rules", ())),
             joint_causes=tuple(JointCause(tuple(j["features"]), _f(j["strength"]), BetaCounts._from(j.get("joint")),
                                           bool(j.get("inseparable"))) for j in d.get("joint_causes", ())),
             entity=d.get("entity", ""), prospective=bool(d.get("prospective")), text=d.get("text", ""),
+            base_log_odds=_fo(d.get("base_log_odds")),
         )
 
 
@@ -525,6 +552,7 @@ class LinkRow:
     lo: float
     hi: float
     lift: float
+    log_odds: float | None = None    # logistic only
 
 
 @dataclass(frozen=True)
@@ -552,7 +580,8 @@ class LinkReport:
     def _from(cls, d: Mapping[str, Any]) -> LinkReport:
         return cls(d["effect"], d.get("entity"), _f(d["baseline"]), _f(d["level"]),
                    tuple(LinkRow(r["feature"], *(_f(r[k]) for k in ("strength", "alpha", "beta", "n", "lo", "hi",
-                                                                       "lift"))) for r in d["rows"]),
+                                                                       "lift")), log_odds=_fo(r.get("log_odds")))
+                         for r in d["rows"]),
                    d.get("text", ""))
 
 
@@ -758,15 +787,28 @@ class RemoteHeapDB:
 
     def register_effect(self, name: str, kernel: Any, priors: Mapping[str, tuple[float, float]] | None = None,
                         default_prior: tuple[float, float] = (1.0, 4.0), cause_types: Iterable[str] | None = None,
-                        credit: str = "proportional", global_pseudocount: float = 5.0, hierarchical: bool = True,
-                        leak: float = 0.05, w_neg: float = 1.0, repeatable: bool = True) -> None:
+                        credit: str | None = None, global_pseudocount: float = 5.0, hierarchical: bool = True,
+                        leak: float = 0.05, w_neg: float = 1.0, repeatable: bool = True,
+                        combine: str = "noisy_or", learning_rate: float | None = None,
+                        l2: float | None = None) -> None:
         """Declare (or replace) an effect. ``kernel``: a heapdb kernel object
-        (``LogNormalKernel(...)``) or ``{"type", "params"}``."""
+        (``LogNormalKernel(...)``) or ``{"type", "params"}``. ``combine``:
+        ``"noisy_or"`` (default) or ``"logistic"`` (``learning_rate``, ``l2``
+        apply to logistic only). ``credit`` defaults to ``"proportional"``
+        for noisy-OR and ``"uniform"`` for logistic."""
         body: dict[str, Any] = {
             "name": name, "kernel": _kernel_spec(kernel), "default_prior": _pair(default_prior),
-            "credit": credit, "global_pseudocount": float(global_pseudocount), "hierarchical": bool(hierarchical),
+            "global_pseudocount": float(global_pseudocount), "hierarchical": bool(hierarchical),
             "leak": _num_out(float(leak)), "w_neg": float(w_neg), "repeatable": bool(repeatable),
         }
+        if credit is not None:
+            body["credit"] = credit
+        if combine != "noisy_or":
+            body["combine"] = combine
+        if learning_rate is not None:
+            body["learning_rate"] = float(learning_rate)
+        if l2 is not None:
+            body["l2"] = float(l2)
         if priors:
             body["priors"] = {str(k): _pair(v) for k, v in priors.items()}
         if cause_types is not None:

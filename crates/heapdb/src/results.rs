@@ -28,10 +28,32 @@ pub struct FeatureContribution {
     pub alpha: f64,
     /// Posterior beta.
     pub beta: f64,
+    /// Logistic weight `w_f`: the feature adds `w_f` to the event's
+    /// log-odds, i.e. multiplies its odds by `exp(w_f)`. `None` under
+    /// noisy-OR.
+    pub log_odds: Option<f64>,
+}
+
+impl FeatureContribution {
+    /// `exp(log_odds)`: the factor this feature multiplies the odds by
+    /// (`None` under noisy-OR).
+    pub fn odds_multiplier(&self) -> Option<f64> {
+        self.log_odds.map(f64::exp)
+    }
 }
 
 impl fmt::Display for FeatureContribution {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(m) = self.odds_multiplier() {
+            return write!(
+                f,
+                "{} x{} (a={}, b={})",
+                self.feature,
+                fmt_g(m, 3),
+                fmt_count(self.alpha),
+                fmt_count(self.beta)
+            );
+        }
         write!(
             f,
             "{}={} (a={}, b={})",
@@ -60,14 +82,15 @@ impl fmt::Display for AppliedRule {
 
 /// A set of features reported as one cause (e.g. `beans+onion`).
 ///
-/// `strength` is what scoring uses (noisy-OR of the members). `joint` is the
+/// `strength` is what scoring uses for the members alone (their noisy-OR,
+/// or under logistic `sigmoid(b + sum of their weights)`). `joint` is the
 /// joint Beta link learned for exactly this set, if it has been judged.
 /// `inseparable` is true while the members have always co-occurred.
 #[derive(Clone, Debug, PartialEq)]
 pub struct JointCause {
     /// Member features, sorted.
     pub features: Vec<String>,
-    /// Noisy-OR of the members' strengths.
+    /// Link of the members alone (noisy-OR or logistic).
     pub strength: f64,
     /// The joint link, if judged.
     pub joint: Option<BetaCounts>,
@@ -110,10 +133,14 @@ pub struct Explanation {
     pub kernel_value: f64,
     /// Dose.
     pub weight: f64,
-    /// Noisy-OR of the feature strengths.
+    /// The link: noisy-OR of the feature strengths, or under logistic
+    /// `sigmoid(base_log_odds + sum of the features' log_odds)`.
     pub link_strength: f64,
     /// Per-feature contributions, strongest first.
     pub features: Vec<FeatureContribution>,
+    /// Logistic intercept `b` (the effect's base log-odds); `None` under
+    /// noisy-OR.
+    pub base_log_odds: Option<f64>,
     /// Confounding warnings.
     pub warnings: Vec<String>,
     /// Applied rules, in rule order.
@@ -144,6 +171,35 @@ impl Explanation {
     /// True if some features of this event are an inseparable joint cause.
     pub fn inseparable(&self) -> bool {
         self.joint_causes.iter().any(|j| j.inseparable)
+    }
+
+    /// `"noisy_or"` or `"logistic"`.
+    pub fn combine(&self) -> &'static str {
+        if self.base_log_odds.is_some() {
+            "logistic"
+        } else {
+            "noisy_or"
+        }
+    }
+
+    /// Logistic: `base_log_odds + sum of the features' log_odds`, so that
+    /// `link_strength = sigmoid(log_odds)`. `None` under noisy-OR.
+    pub fn log_odds(&self) -> Option<f64> {
+        let mut z = self.base_log_odds?;
+        for c in &self.features {
+            z += c.log_odds.unwrap_or(0.0);
+        }
+        Some(z)
+    }
+
+    /// Logistic: `exp(log_odds)` = base odds x every feature's multiplier.
+    pub fn odds(&self) -> Option<f64> {
+        self.log_odds().map(f64::exp)
+    }
+
+    /// Logistic: `exp(base_log_odds)`.
+    pub fn base_odds(&self) -> Option<f64> {
+        self.base_log_odds.map(f64::exp)
     }
 }
 
@@ -193,7 +249,29 @@ impl fmt::Display for Explanation {
         } else {
             parts.join(", ")
         };
-        write!(f, " [noisy-OR of {p}]")?;
+        match (self.base_odds(), self.odds()) {
+            (Some(b), Some(o)) => {
+                // Every feature as a multiplier (joint causes are reported
+                // below, they do not change the product).
+                let ms: Vec<String> = self.features.iter().map(ToString::to_string).collect();
+                let ms = if ms.is_empty() {
+                    String::new()
+                } else {
+                    format!(" x {}", ms.join(" x "))
+                };
+                write!(
+                    f,
+                    " [logistic: base odds {}{ms} = odds {} -> link {}]",
+                    fmt_g(b, 3),
+                    fmt_g(o, 3),
+                    fmt_g(self.link_strength, 3)
+                )?;
+                for j in self.joint_causes.iter().filter(|j| j.inseparable) {
+                    write!(f, "\n      joint cause: {j}")?;
+                }
+            }
+            _ => write!(f, " [noisy-OR of {p}]")?,
+        }
         for j in self.joint_causes.iter().filter(|j| !j.inseparable) {
             write!(f, "\n      joint link (now separable): {j}")?;
         }
@@ -577,6 +655,9 @@ pub struct LinkRow {
     pub hi: f64,
     /// `strength / baseline`.
     pub lift: f64,
+    /// Logistic weight of the feature (log-odds multiplier); `None` under
+    /// noisy-OR.
+    pub log_odds: Option<f64>,
 }
 
 /// Features ranked by learned link strength for one effect.
