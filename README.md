@@ -67,6 +67,14 @@ They all come down to ranking recent events by:
 score(event | effect) = kernel(dt) × weight × noisy_OR_f( strength(f, effect) ) × Π rules
 ```
 
+Noisy-OR treats every feature as an independent way the event could have
+caused the effect, so feature strengths add up (in probability). When the
+features are rather *evidence* about one cause (a high text-match rank, a
+file named in the stack trace, a short lag), evidence should multiply the
+odds instead. Per effect, `combine="logistic"` swaps the link for an online
+logistic regression, `sigmoid(b + Σ_f w_f)`; the rest of the score is
+unchanged. See [Logistic combine mode](#logistic-combine-mode-optional).
+
 You almost never want *all* the scores. You want the best few, now, with
 reasons, and you want the database to learn when you tell it which one was
 right. HeapDB is built around exactly that query, and that is where the name
@@ -493,6 +501,65 @@ rejection it gets `beta += 1`. Joint links are used only for reporting:
 scoring stays per-feature noisy-OR. After the features have been seen apart,
 the joint link is still shown, marked as now separable.
 
+### Logistic combine mode (optional)
+
+`register_effect(..., combine="logistic")` (Rust:
+`EffectOptions::combine(Combine::Logistic)`; server: `"combine": "logistic"`)
+replaces the noisy-OR link of that effect with
+
+```
+link = sigmoid(b + Σ_{f ∈ F} w_f)        odds = e^b × Π_f e^{w_f}
+```
+
+`b` is the effect's base log-odds and `w_f` a feature's log-odds weight: a
+feature multiplies the odds that the event caused the effect by `e^{w_f}`,
+whatever else the event has. The score is still
+`kernel × weight × link × rules`, so calibration reports, top-k pruning
+(bounds use `sigmoid(b + Σ max(0, w_f))` over a segment's features) and
+everything else work unchanged.
+
+- **Seeds from the priors.** Before any feedback `b = logit(mean of
+  default_prior)` and `w_f = logit(prior mean of f) − b`: 0 for features
+  without a registered prior. An event whose features are all at the prior
+  has the base rate as its link; before learning, single-feature events rank
+  as under noisy-OR.
+- **Learning.** Every judged event is one training example of an
+  FTRL-Proximal step on the log-loss with an L2 penalty towards the seeds
+  (`learning_rate`, default 0.1; `l2`, default 1): `feedback` steps on the
+  confirmed event (label 1), then each rejected one (label 0); `observe` is a
+  positive example per event weighted by its responsibility; `settle` a
+  negative one weighted by the evidence it adds.
+- **Credit.** The Beta links are still updated and reported (`link_report`
+  gains each feature's `log_odds`), but scoring uses the weights. The default
+  credit under logistic is `uniform`: the confirmed event counts once for
+  each of its features. The EM split (`proportional`) is derived for
+  noisy-OR, where one feature is the cause and the others are riders; with
+  multiplicative evidence there is no single responsible feature, and the
+  logistic gradient is the same for every feature present.
+- **Explanations** read `base odds × multiplier per feature = odds → link`
+  (here after one confirmation of a migration deploy and one rejection of a
+  config deploy, both fast-reviewed):
+
+  ```
+  lag 0.83h -> kernel 0.696 x weight 1 x link 0.755 [logistic: base odds 0.251 x migration x12.2 (a=4, b=1) x review:fast x1 (a=2, b=5) = odds 3.08 -> link 0.755]
+  ```
+
+  The explanation carries `base_log_odds`, `log_odds` and `odds`, each
+  feature its `log_odds` and `odds_multiplier` (`a`, `b`: its Beta link).
+- **Pooled.** The weights are one vector per effect, pooled across
+  entities (the Beta links keep their per-entity layers for reporting).
+  `forget_entity(scrub_global=True)` subtracts the entity's recorded
+  gradient contributions; this is not exact unlearning, because later
+  steps were taken at weights the entity had influenced.
+- **Persistence.** Snapshots (and the server's WAL) round-trip the mode,
+  hyperparameters and FTRL state; snapshots without it load as noisy-OR.
+
+On the bug-inducing-commit benchmark ([evals/bic/RESULTS.md](evals/bic/RESULTS.md))
+the logistic mode is compared with noisy-OR HeapDB and the learned baselines
+under the same protocol, together with the simpler formulations that were
+tried first (naive-Bayes products of the Beta links). Noisy-OR stays the
+default.
+
 ### Weight semantics: dose / exposure
 
 `weight` is the **magnitude of exposure**: change size, rollout percentage,
@@ -706,6 +773,18 @@ Design direction (**not implemented** beyond `forget_entity`):
   the global-layer updates contributed by each entity (and bound each
   entity's contribution), so the population prior cannot be used to infer
   any one entity's history.
+
+## Changelog: unreleased
+
+- **`combine="logistic"`**: an optional per-effect link, an online logistic
+  regression over the event's features (FTRL-Proximal, L2 towards seeds
+  from the Beta priors), with explanations as base odds × per-feature
+  multipliers. Available in the Rust API (`EffectOptions::combine`,
+  `learning_rate`, `l2`), Python `register_effect`, the server's
+  `POST /effects`, the remote Python client and the TypeScript client.
+  Noisy-OR remains the default and is unchanged, bit for bit.
+- `register_effect(credit=None)` (new default) resolves to `proportional`
+  under noisy-OR (as before) and `uniform` under logistic.
 
 ## Changelog: v0.6
 

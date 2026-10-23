@@ -85,6 +85,11 @@ strength, alpha, beta}], warnings:[str], rules:[{name, multiplier}],
 joint_causes:[{features, name, strength, joint: BetaCounts|null, inseparable}],
 entity, prospective, rule_multiplier, score, inseparable, text}` where
 `score = kernel_value x weight x link_strength x rule_multiplier`.
+For an effect registered with `"combine": "logistic"` the explanation also
+carries `combine: "logistic"`, `base_log_odds`, `base_odds`, `log_odds`, `odds`
+(base odds x every feature's multiplier = odds; `link_strength = odds / (1 + odds)`),
+and each feature `log_odds` (its weight) and `odds_multiplier` (`exp(log_odds)`).
+Noisy-OR explanations do not have these fields.
 
 **BetaCounts**: `{alpha, beta, strength, prior_alpha, prior_beta, pos, neg, global_pos, global_neg}`.
 
@@ -110,14 +115,20 @@ quota is used up):
  "kernel": {"type": "lognormal", "params": {"median": 2700, "sigma": 0.7}},
  "priors": {"migration": [3, 1], "deps": [2, 2]}, "default_prior": [1, 4], "cause_types": ["deploy"],
  "credit": "proportional", "global_pseudocount": 5, "hierarchical": true,
- "leak": 0.05, "w_neg": 1, "repeatable": true}
+ "leak": 0.05, "w_neg": 1, "repeatable": true,
+ "combine": "noisy_or"}
 ```
 
 → `{"ok": true}`. Kernel `type`: `exponential` (alias `exp`; params
 `half_life`, `horizon_half_lives`), `window` (`min_lag`, `max_lag`),
 `lognormal` (`median`, `sigma`, `tail_sigmas`), `gamma` (`shape`, `scale`,
-`tail_stds`). `credit`: `proportional` | `uniform`. Only `name` and `kernel`
-are required. Re-registering an effect replaces it (and drops its rules), as
+`tail_stds`). `credit`: `proportional` | `uniform` (default `proportional`
+for `noisy_or`, `uniform` for `logistic`). `combine`: how an event's features
+combine into its link, `noisy_or` (default, `1 - prod(1 - strength_f)`) or
+`logistic` (`sigmoid(b + sum_f w_f)`, an online logistic regression learned
+from feedback, observe and settle; optional `learning_rate`, default 0.1, and
+`l2`, default 1, the L2 penalty towards the weights' seeds from the priors).
+Only `name` and `kernel` are required. Re-registering an effect replaces it (and drops its rules), as
 in the library.
 
 ### `POST /event-types` (admin)
@@ -208,7 +219,8 @@ Several candidates (`rank_candidates`):
 
 `baseline`: `mean` (default), `prior` or a number; `features`: comma-separated.
 → `{"effect", "entity", "baseline", "level", "rows": [{"feature", "strength", "alpha", "beta", "n", "lo", "hi", "lift"}], "text"}`.
-Rows are associations under the model, not causal effects.
+Rows are associations under the model, not causal effects. For a logistic
+effect each row also has `log_odds`, the feature's learned weight.
 
 ### `GET /calibration?effect=&bins=` (read)
 

@@ -35,6 +35,13 @@ export type KernelSpec =
 
 export type CreditMode = "proportional" | "uniform";
 
+/**
+ * How an effect combines the evidence of an event's features into its link:
+ * `noisy_or` (default; `1 - prod(1 - strength)`) or `logistic`
+ * (`sigmoid(base + sum of feature weights)`, weights learned online).
+ */
+export type CombineMode = "noisy_or" | "logistic";
+
 export interface RegisterEffectOptions {
   kernel: KernelSpec;
   /** Per-feature Beta priors, e.g. `{ beans: [3, 1] }`. */
@@ -42,10 +49,17 @@ export interface RegisterEffectOptions {
   defaultPrior?: BetaPrior;
   /** Only these event types can be causes of this effect. */
   causeTypes?: Iterable<string>;
+  /** Default: `proportional` for `noisy_or`, `uniform` for `logistic`. */
   credit?: CreditMode;
   globalPseudocount?: number;
   /** Probability that the effect happened with no recorded cause. */
   leak?: number;
+  /** How features combine into the link (default `noisy_or`). */
+  combine?: CombineMode;
+  /** Logistic only: FTRL learning rate (default 0.1). */
+  learningRate?: number;
+  /** Logistic only: L2 penalty towards the prior seeds (default 1). */
+  l2?: number;
 }
 
 /**
@@ -125,6 +139,10 @@ export interface FeatureContribution {
   strength: number;
   alpha: number;
   beta: number;
+  /** Logistic only: the feature adds this to the event's log-odds. */
+  logOdds?: number;
+  /** Logistic only: `exp(logOdds)`, the factor it multiplies the odds by. */
+  oddsMultiplier?: number;
 }
 
 export interface AppliedRule {
@@ -168,6 +186,13 @@ export interface Explanation {
   ruleMultiplier?: number;
   score?: number;
   inseparable?: boolean;
+  /** Present (`"logistic"`) only for logistic effects. */
+  combine?: CombineMode;
+  /** Logistic only: base odds x every feature's multiplier = odds -> link. */
+  baseLogOdds?: number;
+  baseOdds?: number;
+  logOdds?: number;
+  odds?: number;
 }
 
 export interface Cause {
@@ -335,6 +360,8 @@ export interface LinkRow {
   lo: number;
   hi: number;
   lift: number;
+  /** Logistic only: the feature's weight (log-odds multiplier). */
+  logOdds?: number;
 }
 
 export interface LinkReport {

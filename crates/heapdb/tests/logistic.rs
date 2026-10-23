@@ -405,12 +405,12 @@ proptest! {
         let lg = logistic_db(o.clone());
         let mut nor = HeapDB::new(900.0, 64).unwrap();
         nor.register_effect("fx", o).unwrap();
-        for i in 0..8 {
-            for j in 0..8 {
-                let (a, b) = (link_of(&lg, "me", &[FEATS[i]]), link_of(&lg, "me", &[FEATS[j]]));
-                let (c, d) = (link_of(&nor, "me", &[FEATS[i]]), link_of(&nor, "me", &[FEATS[j]]));
+        for fi in FEATS {
+            for fj in FEATS {
+                let (a, b) = (link_of(&lg, "me", &[fi]), link_of(&lg, "me", &[fj]));
+                let (c, d) = (link_of(&nor, "me", &[fi]), link_of(&nor, "me", &[fj]));
                 if (c - d).abs() > 1e-9 * c.max(d) {
-                    prop_assert_eq!(a < b, c < d, "{} vs {}", FEATS[i], FEATS[j]);
+                    prop_assert_eq!(a < b, c < d, "{} vs {}", fi, fj);
                 }
             }
         }

@@ -94,6 +94,23 @@ describe("schema endpoints", () => {
     });
   });
 
+  it("registerEffect sends combine, learning_rate and l2 for logistic effects", async () => {
+    const { db, calls } = client([ok()]);
+    await db.registerEffect("incident", {
+      kernel: kernels.window(0, 7200),
+      combine: "logistic",
+      learningRate: 0.5,
+      l2: 2,
+    });
+    expect(calls[0]!.body).toMatchObject({
+      name: "incident",
+      combine: "logistic",
+      learning_rate: 0.5,
+      l2: 2,
+    });
+    expect(calls[0]!.body).not.toHaveProperty("credit");
+  });
+
   it("registerEffect omits unset options and accepts literal kernel specs", async () => {
     const { db, calls } = client([ok()]);
     await db.registerEffect("incident", {
@@ -362,6 +379,60 @@ describe("queries", () => {
     expect(res.entity).toBe("me");
   });
 
+  it("decodes the logistic explanation fields (base odds x multipliers)", async () => {
+    const logistic = {
+      ...explanationWire,
+      link_strength: 0.6,
+      features: [
+        {
+          feature: "dairy",
+          strength: 0.5,
+          alpha: 2,
+          beta: 2,
+          log_odds: 0.9,
+          odds_multiplier: Math.exp(0.9),
+        },
+      ],
+      combine: "logistic",
+      base_log_odds: -0.5,
+      base_odds: Math.exp(-0.5),
+      log_odds: 0.4,
+      odds: Math.exp(0.4),
+    };
+    const { db } = client([
+      json({
+        causes: [{ rank: 1, event: eventWire, score: 0.4, explanation: logistic }],
+        stats: {},
+      }),
+    ]);
+    const ex = (await db.topCauses({ entity: "me", effect: "bloating", at: 54000, explain: true }))
+      .causes[0]!.explanation!;
+    expect(ex).toMatchObject({
+      combine: "logistic",
+      baseLogOdds: -0.5,
+      logOdds: 0.4,
+      linkStrength: 0.6,
+    });
+    expect(ex.odds).toBeCloseTo(Math.exp(0.4));
+    expect(ex.baseOdds).toBeCloseTo(Math.exp(-0.5));
+    expect(ex.features[0]).toMatchObject({ feature: "dairy", logOdds: 0.9 });
+    expect(ex.features[0]!.oddsMultiplier).toBeCloseTo(Math.exp(0.9));
+  });
+
+  it("noisy-OR explanations carry no logistic fields", async () => {
+    const { db } = client([
+      json({
+        causes: [{ rank: 1, event: eventWire, score: 0.4528, explanation: explanationWire }],
+        stats: {},
+      }),
+    ]);
+    const ex = (await db.topCauses({ entity: "me", effect: "bloating", at: 54000, explain: true }))
+      .causes[0]!.explanation!;
+    expect(ex.combine).toBeUndefined();
+    expect(ex.baseLogOdds).toBeUndefined();
+    expect(ex.features[0]!.logOdds).toBeUndefined();
+  });
+
   it("topCauses (group) sends entities, tolerates a minimal response", async () => {
     const { db, calls } = client([json({ causes: [{ event: { id: 1 }, score: 0.1 }], stats: {} })]);
     const res = await db.topCauses({ entities: ["svc-a", "svc-b"], effect: "incident", at: 10 });
@@ -582,6 +653,8 @@ describe("reports and admin", () => {
       level: 0.9,
       rows: [row],
     });
+    const { db: db2 } = client([json({ effect: "x", rows: [{ ...row, log_odds: -1.25 }] })]);
+    expect((await db2.linkReport({ effect: "x" })).rows[0]).toEqual({ ...row, logOdds: -1.25 });
     const r2 = await db.linkReport({ effect: "a b&c" });
     expect(calls[1]!.url).toBe(`${BASE}/links?effect=a%20b%26c`);
     expect(r2.rows).toEqual([row]);

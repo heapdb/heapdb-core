@@ -105,6 +105,17 @@ reports that slice and the remaining 75% separately.
   only FONTE's inputs (`abl:fl-inputs-only`: FL vote rank, max Ochiai,
   history depth), the apples-to-apples row against FONTE. Transfer: leave
   one Defects4J project out.
+- **HeapDB, logistic combine mode** (`heapdb+logistic`, `+tuned`): the same
+  events, effect, feedback and protocol, with the effect registered as
+  `combine="logistic"`: `top_causes` ranks by
+  `kernel(lag) x dose x sigmoid(b + sum of feature weights)`, the weights
+  learned online (FTRL-Proximal, L2 towards seeds from the priors) from the
+  same confirm/reject feedback. Grid: the same kernels and dose, learning
+  rate 0.1 or 0.5 in place of the prior (HeapDB's default prior Beta(1, 4)
+  seeds the intercept). The formulation was chosen on the development slices
+  among simpler alternatives (naive-Bayes products of the Beta links, with
+  several credit rules); `combine_dev.py` re-runs that comparison and
+  RESULTS.md reports it.
 - **Bisection cost:** test runs that `git bisect` needs over the candidates,
   and FONTE's score-weighted bisection with each method's ranking.
 
