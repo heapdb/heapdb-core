@@ -827,3 +827,94 @@ async fn graceful_restart_and_snapshots() {
     assert!(wal.len() <= 2, "covered WAL objects were deleted: {wal:?}");
     n.shutdown();
 }
+
+/// `combine: "logistic"` over the Data API: registered from JSON, explained
+/// as base odds x multipliers, reported with weights, and recovered
+/// bit-identically after a restart (WAL replay).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn logistic_effect_over_http_survives_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = test_config(dir.path());
+    let n = TestNode::start(cfg.clone(), local_backends(&cfg).unwrap());
+    let db = create_db(&n.url).await;
+    let bad = db
+        .post(
+            "/effects",
+            json!({"name": "x", "kernel": {"type": "window", "params": {"min_lag": 0, "max_lag": 7200}}, "combine": "nope"}),
+        )
+        .await;
+    assert_eq!(bad.code(), "invalid_argument", "{}", bad.body);
+    let bad = db
+        .post(
+            "/effects",
+            json!({"name": "x", "kernel": {"type": "window", "params": {"min_lag": 0, "max_lag": 7200}}, "combine": "logistic", "learning_rate": 0}),
+        )
+        .await;
+    assert_eq!(bad.code(), "invalid_argument", "{}", bad.body);
+    db.post_retry(
+        "/effects",
+        json!({
+            "name": "incident",
+            "kernel": {"type": "window", "params": {"min_lag": 0, "max_lag": 6.0 * H}},
+            "priors": {"migration": [3, 1]},
+            "combine": "logistic", "learning_rate": 0.5, "l2": 1.0
+        }),
+    )
+    .await
+    .ok();
+    db.post(
+        "/events",
+        json!({"events": [
+            {"entity": "svc", "time": 0.0, "type": "deploy", "features": ["migration", "team:a"]},
+            {"entity": "svc", "time": 600.0, "type": "deploy", "features": ["config", "team:a"]},
+            {"entity": "svc", "time": 1200.0, "type": "deploy", "features": ["config", "team:b"]}
+        ]}),
+    )
+    .await
+    .ok();
+    let fb = db
+        .post(
+            "/feedback",
+            json!({"entity": "svc", "effect": "incident", "at": H, "confirmed_event_id": 1, "rejected_ids": [2, 3]}),
+        )
+        .await
+        .ok();
+    // Uniform (count) credit is the logistic default.
+    assert_eq!(fb["credit"]["migration"], json!(1.0));
+    let q = json!({"entity": "svc", "effect": "incident", "at": H, "k": 3, "explain": true});
+    let r = db.post("/query/top-causes", q.clone()).await.ok();
+    let ex = &r["causes"][0]["explanation"];
+    assert_eq!(ex["combine"], json!("logistic"));
+    for k in ["base_log_odds", "base_odds", "log_odds", "odds"] {
+        assert!(ex[k].is_number(), "{k} missing: {ex}");
+    }
+    let z = ex["base_log_odds"].as_f64().unwrap()
+        + ex["features"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["log_odds"].as_f64().unwrap())
+            .sum::<f64>();
+    assert!((z - ex["log_odds"].as_f64().unwrap()).abs() < 1e-12);
+    let link = ex["link_strength"].as_f64().unwrap();
+    assert!((link - 1.0 / (1.0 + (-z).exp())).abs() < 1e-12);
+    for c in ex["features"].as_array().unwrap() {
+        let w = c["log_odds"].as_f64().unwrap();
+        assert!((c["odds_multiplier"].as_f64().unwrap() - w.exp()).abs() < 1e-12 * w.exp().max(1.0));
+    }
+    assert!(ex["text"].as_str().unwrap().contains("logistic: base odds"));
+    assert_eq!(r["causes"][0]["event"]["id"], json!(1));
+    let l = db.get("/links?effect=incident&min_support=0").await.ok();
+    assert!(l["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|x| x["log_odds"].is_number()));
+
+    n.shutdown();
+    let n = TestNode::start(cfg.clone(), local_backends(&cfg).unwrap());
+    let db = db.on(&n.url);
+    let r2 = db.post("/query/top-causes", q).await.ok();
+    assert_eq!(r2["causes"], r["causes"]);
+    n.shutdown();
+}

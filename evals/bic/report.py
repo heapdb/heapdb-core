@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import statistics
 from collections import Counter
 from pathlib import Path
@@ -40,7 +41,10 @@ TRACK_TITLES = {
     ("dpdk", "fixes"): "DPDK `Fixes:` trailers (fix -> BIC; candidates = earlier commits sharing a file with the fix, newest 300)",
 }
 HEADLINE_HDB = "heapdb+learned+tuned"
+LOGISTIC = "heapdb+logistic+tuned"
+LOGISTIC_DEFAULT = "heapdb+logistic"
 EQUAL_GROUPS = ("baseline", "learned")
+WORD = {"win": "ahead", "tie": "statistically tied", "loss": "behind"}
 
 
 def rrs(m: dict) -> list[float]:
@@ -100,7 +104,8 @@ def headline(ds: str, tr: str, T: dict) -> list[str]:
     M = T["methods"]
     ref = strongest(M)
     s = summarize(M[HEADLINE_HDB]["ranks"])
-    names = [n for n in (HEADLINE_HDB, "heapdb+learned", "heapdb", ref, "bm25-diff", "bm25-msg") if n in M]
+    names = [n for n in (HEADLINE_HDB, "heapdb+learned", LOGISTIC, LOGISTIC_DEFAULT, "heapdb", ref, "bm25-diff",
+                         "bm25-msg") if n in M]
     names = list(dict.fromkeys(names))
     pub = [n for n in M if M[n]["group"] == "published"]
     L = [f"**{TRACK_TITLES[(ds, tr)]}.** {s['n']} bugs; strongest equal-input baseline: `{ref}`. "
@@ -123,6 +128,95 @@ def _verdicts(M: dict) -> dict[str, list[tuple[str, float, float, float]]]:
         d, lo, hi = cmp_row(M[HEADLINE_HDB], M[nm])
         out[verdict(lo, hi)].append((nm, d, lo, hi))
     return out
+
+
+def logistic_bullets(M: dict, n: int) -> list[str]:
+    """The logistic combine mode against noisy-OR HeapDB and the strongest baseline."""
+    ref = strongest(M)
+    ls = summarize(M[LOGISTIC]["ranks"])
+    d1, lo1, hi1 = cmp_row(M[LOGISTIC], M[HEADLINE_HDB])
+    d2, lo2, hi2 = cmp_row(M[LOGISTIC], M[ref])
+    v1, v2 = verdict(lo1, hi1), verdict(lo2, hi2)
+    vs_nor = {"win": "**beats** noisy-OR HeapDB", "tie": "is statistically tied with noisy-OR HeapDB",
+              "loss": "**trails** noisy-OR HeapDB"}[v1]
+    vs_ref = {"win": f"**beats** `{ref}`", "tie": f"is statistically tied with `{ref}`",
+              "loss": f"**trails** `{ref}`"}[v2]
+    L = [f"- **Logistic combine mode** (`{LOGISTIC}`, not the default): MRR {ls['MRR']:.3f}, Acc@1 "
+         f"{ls['Acc@1']:.3f}, Acc@5 {ls['Acc@5']:.3f}. It {vs_nor} (`{HEADLINE_HDB}`: ΔMRR {d1:+.3f} "
+         f"[{lo1:+.3f}, {hi1:+.3f}]) and {vs_ref}, the strongest equal-input baseline (ΔMRR {d2:+.3f} "
+         f"[{lo2:+.3f}, {hi2:+.3f}])."]
+    k = max(1, round(0.1 * n))
+    ref0 = max((nm for nm in M if M[nm]["group"] in EQUAL_GROUPS), key=lambda nm: statistics.fmean(rrs(M[nm])[:k]))
+    d, lo, hi = paired_bootstrap(rrs(M[LOGISTIC_DEFAULT])[:k], rrs(M[ref0])[:k])
+    d0, lo0, hi0 = paired_bootstrap(rrs(M[LOGISTIC_DEFAULT])[:k], rrs(M["heapdb+learned"])[:k])
+    L.append(f"- **Logistic cold start** (first {k} bugs): `{LOGISTIC_DEFAULT}` is {WORD[verdict(lo, hi)]} of "
+             f"`{ref0}` (ΔMRR {d:+.3f} [{lo:+.3f}, {hi:+.3f}]) and {WORD[verdict(lo0, hi0)]} of noisy-OR "
+             f"`heapdb+learned` (ΔMRR {d0:+.3f} [{lo0:+.3f}, {hi0:+.3f}]).")
+    L.append("")
+    return L
+
+
+def logistic_table(res: dict) -> list[str]:
+    """One row per track: logistic vs noisy-OR HeapDB vs the strongest equal-input baseline."""
+    L = ["### Logistic vs noisy-OR HeapDB vs the strongest equal-input baseline\n",
+         "MRR over the whole stream; ΔMRR paired bootstrap, 95% CI. Tuned = follow-the-leader over each "
+         "fixed grid; default = the first grid entry, no tuning.\n",
+         "| track | noisy-OR tuned | logistic tuned | Δ logistic − noisy-OR | strongest baseline | its MRR | "
+         "Δ logistic − baseline | noisy-OR default | logistic default | Δ (defaults) |",
+         "|---|---|---|---|---|---|---|---|---|---|"]
+    for ds, D in res["datasets"].items():
+        for tr, T in D["tracks"].items():
+            M = T["methods"]
+            if LOGISTIC not in M:
+                continue
+            ref = strongest(M)
+            mrr = lambda nm: statistics.fmean(rrs(M[nm]))  # noqa: E731
+            c = lambda a, b: "{:+.3f} [{:+.3f}, {:+.3f}]".format(*cmp_row(M[a], M[b]))  # noqa: E731
+            L.append(f"| {ds}/{tr} | {mrr(HEADLINE_HDB):.3f} | {mrr(LOGISTIC):.3f} | {c(LOGISTIC, HEADLINE_HDB)} | "
+                     f"`{ref}` | {mrr(ref):.3f} | {c(LOGISTIC, ref)} | {mrr('heapdb+learned'):.3f} | "
+                     f"{mrr(LOGISTIC_DEFAULT):.3f} | {c(LOGISTIC_DEFAULT, 'heapdb+learned')} |")
+    L.append("")
+    return L
+
+
+def design_table(res: dict) -> list[str]:
+    """Formulations tried on the development slices (pure-Python references)."""
+    tracks = [(ds, tr, T) for ds, D in res["datasets"].items() for tr, T in D["tracks"].items() if "design" in T]
+    if not tracks:
+        return []
+    rows = list(tracks[0][2]["design"]["mrr"])
+    ref = rows[0]
+    L = ["## Combine formulations tried (development slices only)\n",
+         "How the logistic mode's formulation was chosen. Each row is a pure-Python reference "
+         "implementation (`evals/bic/combine_dev.py`) run with the same protocol (prequential, flat "
+         "kernel, no dose) on the **development slice only** (first 25% of each stream), so the choice "
+         "did not look at the rest of the streams. (a) = naive-Bayes log-odds sum of the Beta links, "
+         "(b) = learned intercept, (c) = online logistic regression (FTRL-Proximal, L2 towards the seeds). "
+         "MRR; in brackets the difference to the first row.\n",
+         "| formulation | " + " | ".join(f"{ds}/{tr} (bugs 1-{T['design']['dev_n']})" for ds, tr, T in tracks) + " |",
+         "|---|" + "---|" * len(tracks)]
+    for r in rows:
+        cells = []
+        for _, _, T in tracks:
+            x = T["design"]["mrr"][r]
+            cells.append(f"{x:.3f}" if r == ref else f"{x:.3f} ({x - T['design']['mrr'][ref]:+.3f})")
+        L.append(f"| {r} | " + " | ".join(cells) + " |")
+    L.append("")
+    nb = "(a)+(b) naive Bayes, learned base, count credit"
+    lr = "(c) online LR, per event, lr 0.1 (= engine default)"
+    if nb in rows and lr in rows:
+        nb_worse = [f"{ds}/{tr}" for ds, tr, T in tracks if T["design"]["mrr"][nb] < T["design"]["mrr"][ref]]
+        lr_worse = [f"{ds}/{tr}" for ds, tr, T in tracks if T["design"]["mrr"][lr] < T["design"]["mrr"][ref]]
+        L.append("Reading: multiplying the Beta links' odds (naive Bayes, the simplest option) is "
+                 + (f"below noisy-OR on {', '.join(nb_worse)}" if nb_worse else "at or above noisy-OR on every track")
+                 + "; naive Bayes counts correlated evidence (several buckets of related signals) once per "
+                 "feature. The online logistic regression learns discriminative weights instead and is "
+                 + (f"below noisy-OR on {', '.join(lr_worse)}" if lr_worse else "at or above noisy-OR on every track")
+                 + " on these slices, so the engine implements (c). Count credit beats the noisy-OR EM credit for "
+                 "the naive-Bayes variants, and an intercept seeded at a tiny base rate slows the online learner "
+                 "(its negative examples then have almost no gradient), which is why the logistic runs use "
+                 "HeapDB's default prior Beta(1, 4) to seed it.\n")
+    return L
 
 
 def summary(res: dict) -> list[str]:
@@ -173,6 +267,8 @@ def summary(res: dict) -> list[str]:
                 L.append(same)
             L.append(cold)
             L.append("")
+            if LOGISTIC in M:
+                L += logistic_bullets(M, n)
             ref = strongest(M)
             d, lo, hi = cmp_row(M[HEADLINE_HDB], M[ref])
             share = hs["MRR"] / max(1e-9, statistics.fmean(rrs(M[ref])))
@@ -213,7 +309,8 @@ def track_section(ds: str, tr: str, T: dict, meta: dict) -> list[str]:
     L.append(f"| method | MRR bugs 1-{dev} | MRR bugs {dev + 1}-{n} | ΔMRR vs `{ref}` on bugs {dev + 1}-{n} [95% CI] |")
     L.append("|---|---|---|---|")
     seen = set()
-    for nm in [x for x in (HEADLINE_HDB, "heapdb+learned", "logreg", "lambdamart", "linear+tuned", ref) if x in M]:
+    for nm in [x for x in (HEADLINE_HDB, "heapdb+learned", LOGISTIC, LOGISTIC_DEFAULT, "logreg", "lambdamart",
+                            "linear+tuned", ref) if x in M]:
         if nm in seen:
             continue
         seen.add(nm)
@@ -224,11 +321,13 @@ def track_section(ds: str, tr: str, T: dict, meta: dict) -> list[str]:
     # learning curve
     k = 5 if n < 1000 else 10
     bl = blocks(n, k)
-    curve = [x for x in ("heapdb", "heapdb+learned", HEADLINE_HDB, "logreg", "lambdamart", ref) if x in M]
+    curve = [x for x in ("heapdb", "heapdb+learned", HEADLINE_HDB, LOGISTIC_DEFAULT, LOGISTIC, "logreg",
+                         "lambdamart", ref) if x in M]
     curve = list(dict.fromkeys(curve))
     L.append("### Learning curve\n")
     L.append("MRR per consecutive block of the chronological stream; *bugs seen* = labelled bugs "
-             "available to the learners before the block starts. `heapdb` is HeapDB without feedback.\n")
+             "available to the learners before the block starts. `heapdb` is HeapDB without feedback; "
+             "`heapdb+logistic*` use the logistic combine mode.\n")
     L.append("| block | bugs seen | median candidates | BIC outside | " + " | ".join(f"`{c}`" for c in curve) + " |")
     L.append("|---|---|---|---|" + "---|" * len(curve))
     for a, b in bl:
@@ -241,7 +340,7 @@ def track_section(ds: str, tr: str, T: dict, meta: dict) -> list[str]:
     # per project
     if ds == "d4j":
         projs = sorted(set(B["projects"]))
-        cols = [x for x in (HEADLINE_HDB, ref, "bm25-diff", "fonte", "bug2commit (released)") if x in M]
+        cols = [x for x in (HEADLINE_HDB, LOGISTIC, ref, "bm25-diff", "fonte", "bug2commit (released)") if x in M]
         cols = list(dict.fromkeys(cols))
         L.append("### Per project (MRR)\n")
         L.append("| project | bugs | " + " | ".join(f"`{c}`" for c in cols) + " |")
@@ -255,7 +354,7 @@ def track_section(ds: str, tr: str, T: dict, meta: dict) -> list[str]:
         L.append("By label provenance (MRR): " + "; ".join(
             f"{p} (n={c}): " + ", ".join(
                 f"`{x}` {statistics.fmean(rrs(M[x])[i] for i, q in enumerate(B['provenance']) if q == p):.3f}"
-                for x in (HEADLINE_HDB, ref)) for p, c in sorted(prov.items())) + ".\n")
+                for x in (HEADLINE_HDB, LOGISTIC, ref) if x in M) for p, c in sorted(prov.items())) + ".\n")
     # transfer
     if "heapdb+transfer" in M:
         L.append("### Cross-project transfer (leave one project out)\n")
@@ -312,6 +411,22 @@ def track_section(ds: str, tr: str, T: dict, meta: dict) -> list[str]:
             a = top[i] if i < len(top) else None
             b = bot[i] if i < len(bot) else None
             L.append(cell(a) + "| " + cell(b) + "|")
+        L.append("")
+    lg = M.get(LOGISTIC_DEFAULT, {})
+    if lg.get("links_top"):
+        b = lg.get("base_log_odds")
+        L.append(f"Logistic weights after the whole stream (`{LOGISTIC_DEFAULT}`), features with at least 20 "
+                 "observations: each feature multiplies the odds that a candidate is the BIC by "
+                 "exp(weight)" + (f"; intercept (base log-odds) {b:+.2f}" if b is not None else "") + ".\n")
+        L.append("| largest | weight | x odds | n | | smallest | weight | x odds | n |")
+        L.append("|---|---|---|---|---|---|---|---|---|")
+        top, bot = lg["links_top"][:10], lg["links_bottom"][-8:]
+        def wcell(r):
+            return "| | | " if r is None else f"| `{r[0]}` | {r[1]:+.2f} | {math.exp(r[1]):.3g} | {r[2]:.0f} "
+        for i in range(max(len(top), len(bot))):
+            a = top[i] if i < len(top) else None
+            c = bot[i] if i < len(bot) else None
+            L.append(wcell(a) + "| " + wcell(c) + "|")
         L.append("")
     return L
 
@@ -390,20 +505,22 @@ def analysis(res: dict) -> list[str]:
     L = ["## Analysis\n", "### Where HeapDB wins, ties and loses\n",
          f"`{HEADLINE_HDB}` against every other method of the same track (paired bootstrap over bugs, "
          "ΔMRR, 95% CI; win = CI above 0, loss = CI below 0):\n"]
-    L.append("| track | wins against | ties with | loses to |")
-    L.append("|---|---|---|---|")
+    L.append("| track | HeapDB | wins against | ties with | loses to |")
+    L.append("|---|---|---|---|---|")
     for ds, D in res["datasets"].items():
         for tr, T in D["tracks"].items():
             M = T["methods"]
-            if HEADLINE_HDB not in M:
-                continue
-            w, t, l_ = [], [], []
-            for nm in ordered(M):
-                if nm == HEADLINE_HDB or M[nm]["group"] in ("ablation",):
+            for head in (HEADLINE_HDB, LOGISTIC):
+                if head not in M:
                     continue
-                d, lo, hi = cmp_row(M[HEADLINE_HDB], M[nm])
-                {"win": w, "tie": t, "loss": l_}[verdict(lo, hi)].append(f"`{nm}` ({d:+.3f})")
-            L.append(f"| {ds}/{tr} | {', '.join(w) or '-'} | {', '.join(t) or '-'} | {', '.join(l_) or '-'} |")
+                w, t, l_ = [], [], []
+                for nm in ordered(M):
+                    if nm == head or M[nm]["group"] in ("ablation",):
+                        continue
+                    d, lo, hi = cmp_row(M[head], M[nm])
+                    {"win": w, "tie": t, "loss": l_}[verdict(lo, hi)].append(f"`{nm}` ({d:+.3f})")
+                L.append(f"| {ds}/{tr} | `{head}` | {', '.join(w) or '-'} | {', '.join(t) or '-'} | "
+                         f"{', '.join(l_) or '-'} |")
     L.append("")
     L.append("### Where HeapDB ties or loses (where it does not help)\n")
     for ds, D in res["datasets"].items():
@@ -437,9 +554,10 @@ def analysis(res: dict) -> list[str]:
     return L
 
 
-STATIC = """### Why noisy-OR is likely at a disadvantage here
+STATIC = """### Why noisy-OR is at a disadvantage here
 
-This is our reading of the evidence, not a tested result. HeapDB's link model is a noisy-OR over *causes*: each feature of an event is an
+This was our reading of the first results; the logistic combine mode (above)
+is the test. HeapDB's default link model is a noisy-OR over *causes*: each feature of an event is an
 independent way of producing the effect, and the score adds up (in
 probability) the strength of each feature. On this task most features are
 not causes but *evidence* about one cause: a high BM25 rank, a file named in
@@ -451,6 +569,10 @@ Bucketing continuous signals into binary features also discards the order
 inside a bucket, which a model on the raw score keeps. The ablations point the
 same way: the signal buckets carry almost all of HeapDB's accuracy, and the
 identity features (author, directory, keyword) add little on their own.
+The development-slice study shows the multiplication alone is not the whole
+story: naive Bayes (odds of the existing Beta links multiplied together)
+double-counts correlated buckets, and it is the discriminatively learned
+weights of the online logistic regression that make the logistic mode work.
 
 ### Threats to validity
 
@@ -506,6 +628,7 @@ def render(res: dict) -> str:
          "bugs whose BIC is a candidate. ΔMRR: paired bootstrap over bugs, 95% CI.\n"]
     L += summary(res)
     L.append("## Headline tables\n")
+    L += logistic_table(res)
     for ds, D in res["datasets"].items():
         for tr, T in D["tracks"].items():
             L += headline(ds, tr, T)
@@ -536,6 +659,7 @@ def render(res: dict) -> str:
                      f"After removing trailers and hex ids, {st['query_contains_bic_subject']} fix messages "
                      "still quote the BIC's subject line.\n")
     L += analysis(res)
+    L += design_table(res)
     L.append(STATIC)
     L.append("## Setup\n")
     e = meta["env"]
@@ -545,6 +669,10 @@ def render(res: dict) -> str:
              f"{meta.get('runtime_seconds', 0):.0f} s (cached per-method results are reused).")
     L.append(f"- HeapDB grid (follow-the-leader): {', '.join(g['name'] for g in meta['hdb_grid'])}; "
              f"default `{meta['hdb_default']}`.")
+    if meta.get("hdb_logistic_grid"):
+        L.append(f"- HeapDB logistic grid (follow-the-leader): "
+                 f"{', '.join(g['name'] for g in meta['hdb_logistic_grid'])}; default "
+                 f"`{meta['hdb_logistic_default']}` (prior Beta(1, 4) seeds the intercept).")
     for ds, D in res["datasets"].items():
         m = D["meta"]
         if ds == "d4j":
