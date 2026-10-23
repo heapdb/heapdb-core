@@ -14,7 +14,11 @@ First preview of the TypeScript client for the HeapDB Data API.
   logistic combine mode. Logistic explanations decode `combine`, `baseLogOdds`,
   `baseOdds`, `logOdds`, `odds` and per-feature `logOdds` / `oddsMultiplier`;
   link-report rows decode `logOdds`. All optional, absent for noisy-OR effects.
-
+- Catalog: `effects({limit, cursor})`, `entities({prefix, limit, cursor})`,
+  `eventTypes({features, limit, cursor})` and `occurrences({effect, entity, limit, cursor})`
+  (server `GET /effects`, `/entities`, `/event-types`, `/occurrences`; read scope). Each
+  returns one page with `nextCursor` (`null` on the last page); effects include
+  `combine` and, for logistic effects, `logistic: {learningRate, l2, baseLogOdds}`.
 - `connect(url?, opts?)`: parses `heapdb://<api_key>@<host>/<database_id>` (or
   `HEAPDB_URL`), with `timeoutMs`, `retries`, `retryBaseDelayMs`, `retryMaxDelayMs`,
   `userAgent`, `baseUrl` (self-hosted), `fetch` and `headers` options.

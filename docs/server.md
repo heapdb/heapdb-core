@@ -39,7 +39,7 @@ The server never sees or stores API keys in clear: the Admin API registers
 `sha256(key)` (lowercase hex) with the key's scopes and optional expiry. A
 request's `Authorization: Bearer <api_key>` is hashed and looked up.
 
-**Scopes.** `read` (queries, reports), `write` (inserts and learning: events,
+**Scopes.** `read` (queries, reports, catalog listings), `write` (inserts and learning: events,
 feedback, observe, settle), `admin` (schema calls: effects, event types, rules,
 `forget_entity`). Scopes are independent; a full-access key has all three.
 `GET /v1/databases/{id}` works with any valid key of the database.
@@ -50,6 +50,7 @@ feedback, observe, settle), `admin` (schema calls: effects, event types, rules,
 | `POST /effects`, `POST /event-types`, `POST /rules`, `DELETE /entities/{entity}` | `admin` |
 | `POST /events`, `POST /feedback`, `POST /observe`, `POST /settle` | `write` |
 | `POST /query/top-causes`, `POST /query/risk`, `GET /links`, `GET /calibration` | `read` |
+| `GET /effects`, `GET /entities`, `GET /event-types`, `GET /occurrences` (catalog) | `read` |
 | `POST /hql` | `read` for TOP / RISK / LINKS / CALIBRATION, `write` for INSERT / FEEDBACK / OBSERVE / SETTLE |
 
 The admin token (`HEAPDB_ADMIN_TOKEN`) is compared in constant time. Expose
@@ -225,6 +226,86 @@ effect each row also has `log_odds`, the feature's learned weight.
 ### `GET /calibration?effect=&bins=` (read)
 
 → `{"effect", "n", "brier", "bins": [{"lo", "hi", "count", "mean_predicted", "observed_rate"}], "text"}`.
+
+### Catalog (read)
+
+What a database holds, so people (and autocomplete) know what to ask:
+effect names, entity names, event types and features, and recent effect
+occurrences. Each call does a bounded amount of work: a scan stops at a cap
+and the response says so with `truncated: true`. Every catalog list is
+paged: `limit` sets the page size (an oversized `limit` is capped, `0` or a
+non-integer is `400 bad_request`), and a non-null `next_cursor` is passed
+back as `cursor` for the next page (`null`: last page). Cursors are opaque
+strings; a malformed one is `400 bad_request`. Catalog calls need the
+`read` scope and are counted requests, like every other Data API call.
+
+**`GET /effects?limit=100&cursor=`** → `{"effects": [EffectInfo],
+"next_cursor", "total_effects"}`, in registration order. `limit` is 1-500
+(default 100). An `EffectInfo`:
+
+```json
+{"name": "error_spike",
+ "kernel": {"type": "lognormal", "params": {"median": 2700, "sigma": 0.7, "tail_sigmas": 4},
+            "human": {"median_s": 2700, "sigma": 0.7, "peak_s": 1654.1, "max_lag_s": 44400.5},
+            "text": "typical lag 45m, looks back up to 12h 20m"},
+ "credit": "proportional", "combine": "noisy_or", "logistic": null,
+ "cause_types": ["deploy"],
+ "priors": {"count": 2, "default": [1, 4],
+            "top": [{"feature": "migration", "alpha": 3, "beta": 1, "strength": 0.75}]},
+ "rules": ["docs only"], "hierarchical": true, "global_pseudocount": 5,
+ "leak": 0.05, "w_neg": 1, "repeatable": true,
+ "counts": {"occurrences": 12, "occurrence_entities": 3, "feedback": 4,
+            "feedback_confirmed": 2, "learned_features": 9}}
+```
+
+`kernel.type` is `exponential`, `window`, `lognormal` or `gamma`;
+`kernel.params` is the `POST /effects` form; `kernel.human` gives the same in
+seconds with `_s` names (`half_life_s`, `min_lag_s`, `median_s` or `mean_s`)
+plus `peak_s` (lag of the peak) and `max_lag_s` (the kernel's lookback: a
+sensible default for `WITHIN`). `combine` is `noisy_or` or `logistic`; for
+`logistic`, `logistic` is `{"learning_rate", "l2", "base_log_odds"}` (the
+learned intercept), otherwise `null`. `cause_types` is `null` when any type
+can be a cause. At most 20 priors are listed (strongest first);
+`priors.count` is the total. `counts.occurrences` are the times recorded by
+`observe`; `counts.feedback` the feedback records (one per confirmed or
+rejected event).
+
+**`GET /entities?prefix=&limit=50&cursor=`** → `{"entities": [{"name",
+"event_count", "first_event_time", "last_event_time"}], "next_cursor",
+"matched", "scanned", "total_entities", "truncated"}`. Most recent activity
+first (ties by name). `prefix` is case-sensitive. `limit` is 1-500
+(default 50). There is no recency index, so this examines up to 100,000
+entities, the most recently created first; `truncated: true` means some
+entities were not examined. `matched` counts the examined entities that
+match `prefix` (`0`: no entity by that name). Entities whose activity
+changes between pages can move ahead of the cursor and be skipped.
+
+**`GET /event-types?features=20&limit=100&cursor=`** → `{"event_types":
+[{"type", "count", "last_event_time", "registered", "weight",
+"top_features": [{"feature", "count"}]}], "next_cursor", "total_types",
+"events_scanned", "total_events", "truncated"}`. Most events first (ties by
+name); registered types without events last (`count: 0`,
+`last_event_time: null`). `weight` is the `POST /event-types` weight spec of
+a registered type (else `null`). `features` (1-100, default 20) is the
+number of most common features per type, for autocompleting `FEATURES`
+lists. `limit` is 1-1000 (default 100); `total_types` counts all listed
+types. Counts come from at most the 100,000 most recent events (of the most
+recently active entities); with `truncated: true` they describe that
+sample. Every page recomputes the list, so a page boundary can shift if
+events arrive in between.
+
+**`GET /occurrences?effect=&entity=&limit=20&cursor=`** → `{"occurrences":
+[{"effect", "entity", "at", "sources", "confirmed_event_id", "rejected"}],
+"next_cursor", "truncated"}`: the times an effect was recorded, newest first
+(ties by entity, then effect); later pages go further back. `sources` says
+where a time comes from: `observe` (the occurrence times `POST /observe`
+stores) and/or `feedback` (the effect time of `POST /feedback`, with the
+confirmed event, or `null`, and the number of rejected ones). Both filters
+are optional (no `effect`: all effects); an unknown `effect` is
+`404 unknown_effect`, an unknown `entity` an empty list. `limit` is 1-200
+(default 20). Plain inserts are not effect occurrences: an effect only shows
+up here once it was observed or given feedback. Examines at most 100,000
+entities and the 100,000 most recent feedback records per effect.
 
 ### `DELETE /entities/{entity}?scrub_global=false` (admin)
 
@@ -501,7 +582,18 @@ Tuning (mostly for tests): `HEAPDB_LEASE_TTL_MS` (30000),
   `weight_attr("rollout_pct", 100)`, `weight_const(2)`,
   `where("kind", "==", "docs")`, `where("amount", "<", 10, default=0)`.
   Errors are `heapdb.HeapDBError` subclasses with `.code`, `.status`, `.retry_after`.
-* TypeScript: `@heapdb/client` (`connect(process.env.HEAPDB_URL!)`).
+  Catalog: `effects(limit=100, cursor=None)`,
+  `entities(prefix=None, limit=50, cursor=None)`,
+  `event_types(features=20, limit=100, cursor=None)`,
+  `occurrences(effect=None, entity=None, limit=20, cursor=None)`. Each returns
+  one page: a `list` with `.next_cursor` (pass it as `cursor`; `None`: last
+  page) and `.truncated`. `effects()` and `entities()` hold `str` subclasses
+  (effect and entity names) carrying the catalog fields as attributes.
+* TypeScript: `@heapdb/client` (`connect(process.env.HEAPDB_URL!)`); catalog:
+  `effects({limit, cursor})`, `entities({prefix, limit, cursor})`,
+  `eventTypes({features, limit, cursor})`,
+  `occurrences({effect, entity, limit, cursor})`, each one page with
+  `nextCursor`.
 
 Both retry `429 rate_limited` and `503` with backoff honouring `Retry-After`,
 and never retry quota errors.

@@ -606,6 +606,17 @@ impl LinkTable {
         )
     }
 
+    /// Registered feature priors `(feature id, (alpha, beta))`, in no
+    /// particular order.
+    pub fn priors(&self) -> impl Iterator<Item = (FeatureId, (f64, f64))> + '_ {
+        self.priors.iter().map(|(&f, &p)| (f, p))
+    }
+
+    /// Number of features with global evidence.
+    pub fn num_learned(&self) -> usize {
+        self.global.len()
+    }
+
     /// Entities with own evidence.
     pub fn entity_ids(&self) -> impl Iterator<Item = EntityId> + '_ {
         self.entity.keys().copied()

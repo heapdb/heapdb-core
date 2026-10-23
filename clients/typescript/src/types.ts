@@ -392,6 +392,145 @@ export interface CalibrationReport {
   bins: CalibrationBin[];
 }
 
+// -- catalog ----------------------------------------------------------------
+
+export interface EffectKernelInfo {
+  /** `exponential`, `window`, `lognormal` or `gamma`. */
+  type: string;
+  /** As accepted by `registerEffect` (seconds). */
+  params: Record<string, number>;
+  /** Seconds, named `*_s`: `half_life_s`, `median_s`, ..., plus `peak_s` and `max_lag_s`. */
+  human: Record<string, number>;
+  /** E.g. `typical lag 45m, looks back up to 12h 20m`. */
+  text: string;
+}
+
+export interface EffectsOptions extends RequestOptions {
+  /** 1-500 (default 100). */
+  limit?: number;
+  /** `nextCursor` of the previous page. */
+  cursor?: string;
+}
+
+export interface EffectInfo {
+  name: string;
+  kernel: EffectKernelInfo;
+  credit: CreditMode;
+  combine: CombineMode;
+  /** Logistic hyperparameters and learned intercept; `null` for `noisy_or`. */
+  logistic: { learningRate: number; l2: number; baseLogOdds: number } | null;
+  /** `null`: any event type can be a cause. */
+  causeTypes: string[] | null;
+  priors: {
+    count: number;
+    default: [number, number];
+    top: { feature: string; alpha: number; beta: number; strength: number }[];
+  };
+  rules: string[];
+  hierarchical: boolean;
+  globalPseudocount: number;
+  /** Background score for `observe` (may be `Infinity`). */
+  leak: number;
+  wNeg: number;
+  repeatable: boolean;
+  /** `occurrences`, `occurrenceEntities`, `feedback`, `feedbackConfirmed`, `learnedFeatures`. */
+  counts: Record<string, number>;
+}
+
+export interface EffectPage {
+  /** Registration order. */
+  effects: EffectInfo[];
+  /** Pass as `cursor` for the next page; `null` on the last page. */
+  nextCursor: string | null;
+  totalEffects: number;
+}
+
+export interface EntitiesOptions extends RequestOptions {
+  /** Case-sensitive name prefix. */
+  prefix?: string;
+  /** 1-500 (default 50). */
+  limit?: number;
+  /** `nextCursor` of the previous page. */
+  cursor?: string;
+}
+
+export interface EntityInfo {
+  name: string;
+  eventCount: number;
+  firstEventTime: number;
+  lastEventTime: number;
+}
+
+export interface EntityPage {
+  /** Most recent activity first. */
+  entities: EntityInfo[];
+  /** Pass as `cursor` for the next page; `null` on the last page. */
+  nextCursor: string | null;
+  /** Examined entities matching the prefix. */
+  matched: number;
+  totalEntities: number;
+  /** The server stopped scanning at its cap. */
+  truncated: boolean;
+}
+
+export interface EventTypesOptions extends RequestOptions {
+  /** Most common features per type, 1-100 (default 20). */
+  features?: number;
+  /** Types per page, 1-1000 (default 100). */
+  limit?: number;
+  /** `nextCursor` of the previous page. */
+  cursor?: string;
+}
+
+export interface EventTypeInfo {
+  type: string;
+  count: number;
+  lastEventTime: number | null;
+  registered: boolean;
+  /** Registered weight spec, `null` if none. */
+  weight: WeightSpec | null;
+  topFeatures: { feature: string; count: number }[];
+}
+
+export interface EventTypeCatalog {
+  /** Most events first; registered types without events last. */
+  eventTypes: EventTypeInfo[];
+  /** Pass as `cursor` for the next page; `null` on the last page. */
+  nextCursor: string | null;
+  totalTypes: number;
+  eventsScanned: number;
+  totalEvents: number;
+  truncated: boolean;
+}
+
+export interface OccurrencesOptions extends RequestOptions {
+  effect?: string;
+  entity?: string;
+  /** 1-200 (default 20). */
+  limit?: number;
+  /** `nextCursor` of the previous page (further back in time). */
+  cursor?: string;
+}
+
+export interface OccurrenceInfo {
+  effect: string;
+  entity: string;
+  at: number;
+  /** `observe` and/or `feedback`. */
+  sources: string[];
+  confirmedEventId: number | null;
+  rejected: number;
+}
+
+export interface OccurrencePage {
+  /** Newest first (ties by entity, then effect). */
+  occurrences: OccurrenceInfo[];
+  /** Pass as `cursor` for the next page; `null` on the last page. */
+  nextCursor: string | null;
+  /** The server stopped a scan at its cap. */
+  truncated: boolean;
+}
+
 export interface ForgetEntityOptions extends RequestOptions {
   /** Also remove this entity's contribution to the global link layer. */
   scrubGlobal?: boolean;

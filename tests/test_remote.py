@@ -266,6 +266,74 @@ def test_errors(server):
     assert ei.value.code == "insufficient_scope"
 
 
+def test_catalog(server):
+    local, db = HeapDB(bucket_seconds=900), _new_db(server)
+    # Empty database: empty first pages.
+    for page in (db.effects(), db.entities(), db.event_types(), db.occurrences()):
+        assert page == [] and page.next_cursor is None and not page.truncated
+    assert db.effects().total_effects == 0 and db.event_types().total_events == 0
+    for d in (local, db):
+        _schema(d)
+    assert db.effects() == local.effects == ["bloating"]
+    eff = db.effects()[0]
+    assert eff.name == "bloating" and eff.kernel["type"] == "lognormal"
+    assert eff.kernel["human"]["median_s"] == 2 * H and eff.max_lag > 2 * H
+    assert eff.cause_types == ["meal", "snack"] and eff.rules == ["tiny", "snacks"]
+    assert eff.priors["top"][0]["feature"] == "beans" and eff.counts["occurrences"] == 0
+    assert eff.combine == "noisy_or" and eff.logistic is None
+    assert db.entities() == [] and db.event_types()[0].registered and db.occurrences() == []
+    # Effects page in registration order; logistic effects report their mode.
+    db.register_effect("churn", {"type": "exp", "params": {"half_life": 60}}, combine="logistic", learning_rate=0.5)
+    first = db.effects(limit=1)
+    assert first == ["bloating"] and first.total_effects == 2 and first.next_cursor
+    second = db.effects(limit=1, cursor=first.next_cursor)
+    assert second == ["churn"] and second.next_cursor is None
+    assert second[0].combine == "logistic" and second[0].logistic["learning_rate"] == 0.5
+    with pytest.raises(InvalidArgumentError):
+        db.effects(cursor="zz")
+    for ent, t in (("acme/web", 0.0), ("acme/api", H), ("checkout", 2 * H), ("acme/api", 3 * H)):
+        for d in (local, db):
+            d.insert(ent, t, "meal" if t != 2 * H else "snack", {"beans", "onion"} if t else {"dairy"})
+    ents = db.entities()
+    assert ents == ["acme/api", "checkout", "acme/web"]  # most recent activity first
+    assert sorted(ents) == local.entities
+    assert ents[0].event_count == 2 and ents[0].last_event_time == 3 * H and ents.next_cursor is None
+    page = db.entities("acme/", limit=1)
+    assert page == ["acme/api"] and page.next_cursor and page.matched == 2
+    assert db.entities("acme/", limit=1, cursor=page.next_cursor) == ["acme/web"]
+    assert db.entities("zzz") == [] and db.entities("zzz").matched == 0
+    types = db.event_types()
+    assert [t.type for t in types] == ["meal", "snack"] and types.total_types == 2 and types.total_events == 4
+    meal = types[0]
+    assert (meal.type, meal.count, meal.features[0]) == ("meal", 3, "beans")
+    assert meal.top_features[0] == ("beans", 2) and meal.weight["kind"] == "attr"
+    tp = db.event_types(limit=1)
+    assert [t.type for t in tp] == ["meal"] and tp.next_cursor
+    assert [t.type for t in db.event_types(limit=1, cursor=tp.next_cursor)] == ["snack"]
+    db.observe("acme/api", "bloating", 3.5 * H)
+    db.feedback("checkout", "bloating", 2.5 * H, confirmed_event_id=3)
+    occ = db.occurrences("bloating")
+    assert [(o.entity, o.at, o.sources) for o in occ] == [("acme/api", 3.5 * H, ("observe",)),
+                                                          ("checkout", 2.5 * H, ("feedback",))]
+    assert occ.next_cursor is None
+    assert occ[1].confirmed_event_id == 3 and db.occurrences(entity="checkout", limit=1)[0].entity == "checkout"
+    o1 = db.occurrences("bloating", limit=1)
+    assert o1 == occ[:1] and o1.next_cursor
+    o2 = db.occurrences("bloating", limit=1, cursor=o1.next_cursor)
+    assert o2 == occ[1:] and o2.next_cursor is None
+    with pytest.raises(NotFoundError):
+        db.occurrences("nope")
+    # Same scope as the other reads: read works, write-only and admin-only keys do not.
+    ro = _new_db(server, scopes=("read",))
+    assert ro.effects() == [] and ro.entities() == []
+    for scopes in (("write",), ("admin",)):
+        k = _new_db(server, scopes=scopes)
+        for call in (k.effects, k.entities, k.event_types, k.occurrences):
+            with pytest.raises(PermissionDeniedError) as ei:
+                call()
+            assert ei.value.code == "insufficient_scope"
+
+
 def test_rate_limit_is_retried(server):
     db = _new_db(server, limits={"max_requests_per_minute": 60}, retries=3)
     db.register_effect("e", {"type": "exp", "params": {"half_life": 60}})

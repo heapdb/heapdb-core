@@ -49,8 +49,15 @@ __all__ = [
     "BetaCounts",
     "CalibrationBin",
     "CalibrationReport",
+    "CatalogPage",
     "Cause",
     "ConflictError",
+    "EffectInfo",
+    "EffectList",
+    "EntityInfo",
+    "EntityList",
+    "EventTypeInfo",
+    "EventTypeList",
     "EventCredit",
     "Explanation",
     "FeatureContribution",
@@ -62,6 +69,7 @@ __all__ = [
     "LinkRow",
     "NotFoundError",
     "ObserveReport",
+    "OccurrenceInfo",
     "PayloadTooLargeError",
     "PermissionDeniedError",
     "QueryLanguageError",
@@ -614,6 +622,157 @@ class CalibrationReport:
 
 
 # ---------------------------------------------------------------------------
+# Catalog
+# ---------------------------------------------------------------------------
+
+
+class CatalogPage(list):
+    """One page of a catalog listing. ``next_cursor``: pass it as ``cursor`` for
+    the next page (``None``: last page). ``truncated``: the server stopped a
+    scan at its cap, so the listing covers a sample."""
+
+    next_cursor: str | None = None
+    truncated: bool = False
+
+    @classmethod
+    def _of(cls, items: Any, r: Mapping[str, Any]) -> Any:
+        out = cls(items)
+        out.next_cursor = r.get("next_cursor")
+        out.truncated = bool(r.get("truncated", False))
+        return out
+
+
+class EffectInfo(str):
+    """A registered effect: the name (a ``str``, so ``set(db.effects())`` compares
+    like :attr:`heapdb.HeapDB.effects`) with the catalog fields as attributes:
+    ``kernel`` (``{"type", "params", "human", "text"}``), ``credit``,
+    ``combine`` (``"noisy_or"`` or ``"logistic"``), ``logistic``
+    (``{"learning_rate", "l2", "base_log_odds"}`` or ``None``), ``cause_types``,
+    ``priors`` (``{"count", "default", "top"}``), ``rules``, ``repeatable``,
+    ``counts`` (``occurrences``, ``feedback``, ...)."""
+
+    kernel: dict[str, Any]
+    credit: str
+    combine: str
+    logistic: dict[str, float] | None
+    cause_types: list[str] | None
+    priors: dict[str, Any]
+    rules: list[str]
+    repeatable: bool
+    counts: dict[str, int]
+    raw: dict[str, Any]
+
+    @classmethod
+    def _from(cls, d: Mapping[str, Any]) -> EffectInfo:
+        e = cls(d["name"])
+        e.kernel = dict(d.get("kernel") or {})
+        e.credit = d.get("credit", "proportional")
+        e.combine = d.get("combine", "noisy_or")
+        lg = d.get("logistic")
+        e.logistic = None if lg is None else {k: _f(v) for k, v in lg.items()}
+        e.cause_types = d.get("cause_types")
+        e.priors = dict(d.get("priors") or {})
+        e.rules = list(d.get("rules") or ())
+        e.repeatable = bool(d.get("repeatable", True))
+        e.counts = {k: int(v) for k, v in (d.get("counts") or {}).items()}
+        e.raw = dict(d)
+        return e
+
+    @property
+    def name(self) -> str:
+        return str(self)
+
+    @property
+    def max_lag(self) -> float | None:
+        """The kernel's lookback in seconds (a sensible ``WITHIN``)."""
+        v = self.kernel.get("human", {}).get("max_lag_s")
+        return None if v is None else _f(v)
+
+
+class EntityInfo(str):
+    """An entity name with ``event_count``, ``first_event_time`` and ``last_event_time``."""
+
+    event_count: int
+    first_event_time: float
+    last_event_time: float
+
+    @classmethod
+    def _from(cls, d: Mapping[str, Any]) -> EntityInfo:
+        e = cls(d["name"])
+        e.event_count = int(d["event_count"])
+        e.first_event_time = _f(d["first_event_time"])
+        e.last_event_time = _f(d["last_event_time"])
+        return e
+
+    @property
+    def name(self) -> str:
+        return str(self)
+
+
+class EntityList(CatalogPage):
+    """A page of :class:`EntityInfo`, most recent activity first. ``next_cursor``:
+    pass it as ``cursor`` for the next page (``None``: last page). ``truncated``:
+    the server stopped scanning at its cap. ``matched``: examined entities
+    matching the prefix."""
+
+    matched: int = 0
+    total_entities: int = 0
+
+
+class EffectList(CatalogPage):
+    """A page of :class:`EffectInfo` in registration order; ``total_effects``
+    counts all registered effects."""
+
+    total_effects: int = 0
+
+
+class EventTypeList(CatalogPage):
+    """A page of :class:`EventTypeInfo`, most events first. ``total_types``
+    counts all listed types; ``events_scanned`` of ``total_events`` were
+    examined (``truncated`` if not all)."""
+
+    total_types: int = 0
+    events_scanned: int = 0
+    total_events: int = 0
+
+
+@dataclass(frozen=True)
+class EventTypeInfo:
+    type: str
+    count: int
+    last_event_time: float | None
+    registered: bool
+    top_features: tuple[tuple[str, int], ...]
+    weight: dict[str, Any] | None = None
+
+    @property
+    def features(self) -> list[str]:
+        """The most common features, most frequent first."""
+        return [f for f, _ in self.top_features]
+
+    @classmethod
+    def _from(cls, d: Mapping[str, Any]) -> EventTypeInfo:
+        return cls(d["type"], int(d["count"]), _fo(d.get("last_event_time")), bool(d.get("registered")),
+                   tuple((f["feature"], int(f["count"])) for f in d.get("top_features", ())), d.get("weight"))
+
+
+@dataclass(frozen=True)
+class OccurrenceInfo:
+    effect: str
+    entity: str
+    at: float
+    sources: tuple[str, ...]
+    confirmed_event_id: int | None = None
+    rejected: int = 0
+
+    @classmethod
+    def _from(cls, d: Mapping[str, Any]) -> OccurrenceInfo:
+        c = d.get("confirmed_event_id")
+        return cls(d["effect"], d["entity"], _f(d["at"]), tuple(d.get("sources", ())),
+                   None if c is None else int(c), int(d.get("rejected", 0)))
+
+
+# ---------------------------------------------------------------------------
 # Connection URL
 # ---------------------------------------------------------------------------
 
@@ -990,6 +1149,48 @@ class RemoteHeapDB:
     def calibration_report(self, effect: str, bins: int = 10) -> CalibrationReport:
         return CalibrationReport._from(self._request("GET", "/calibration", query={"effect": effect,
                                                                                     "bins": int(bins)}))
+
+    # -- catalog --------------------------------------------------------------------
+
+    def effects(self, *, limit: int = 100, cursor: str | None = None) -> EffectList:
+        """Registered effects in registration order (a page of at most ``limit``,
+        max 500), each a ``str`` with the catalog fields (kernel, combine,
+        priors, counts, ...) as attributes. ``.total_effects`` counts them all."""
+        r = self._request("GET", "/effects", query={"limit": int(limit), "cursor": cursor or None})
+        out = EffectList._of((EffectInfo._from(e) for e in r["effects"]), r)
+        out.total_effects = int(r.get("total_effects", len(out)))
+        return out
+
+    def entities(self, prefix: str | None = None, *, limit: int = 50, cursor: str | None = None) -> EntityList:
+        """Entities by most recent activity (a page of at most ``limit``, max 500),
+        optionally those whose name starts with ``prefix``."""
+        r = self._request("GET", "/entities", query={"prefix": prefix or None, "limit": int(limit),
+                                                     "cursor": cursor or None})
+        out = EntityList._of((EntityInfo._from(e) for e in r["entities"]), r)
+        out.matched = int(r.get("matched", len(out)))
+        out.total_entities = int(r.get("total_entities", len(out)))
+        return out
+
+    def event_types(self, *, features: int = 20, limit: int = 100, cursor: str | None = None) -> EventTypeList:
+        """Event types with counts and their ``features`` most common features,
+        most events first (a page of at most ``limit``, max 1000).
+        ``.total_types``, ``.events_scanned`` and ``.total_events`` describe the
+        whole listing."""
+        r = self._request("GET", "/event-types", query={"features": int(features), "limit": int(limit),
+                                                        "cursor": cursor or None})
+        out = EventTypeList._of((EventTypeInfo._from(t) for t in r["event_types"]), r)
+        out.total_types = int(r.get("total_types", len(out)))
+        out.events_scanned = int(r.get("events_scanned", 0))
+        out.total_events = int(r.get("total_events", 0))
+        return out
+
+    def occurrences(self, effect: str | None = None, entity: str | None = None, *,
+                    limit: int = 20, cursor: str | None = None) -> CatalogPage:
+        """Effect occurrences (from ``observe`` and ``feedback``), newest first (a
+        page of at most ``limit``, max 200; later pages go further back)."""
+        r = self._request("GET", "/occurrences", query={"effect": effect, "entity": entity, "limit": int(limit),
+                                                        "cursor": cursor or None})
+        return CatalogPage._of((OccurrenceInfo._from(o) for o in r["occurrences"]), r)
 
     def execute(self, query: str, now: float | None = None) -> Any:
         """Run one query-language statement on the server (``now`` resolves
