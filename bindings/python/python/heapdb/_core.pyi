@@ -141,6 +141,12 @@ class LinkTable:
     def strength(self, feature: str, entity: str | None = None) -> float: ...
     def strengths(self, features: Iterable[str], entity: str | None = None) -> dict[str, float]: ...
     def noisy_or(self, features: Iterable[str], entity: str | None = None) -> float: ...
+    @property
+    def combine(self) -> str: ...
+    @property
+    def base_log_odds(self) -> float | None: ...
+    def weight(self, feature: str) -> float | None: ...
+    def link(self, features: Iterable[str], entity: str | None = None) -> float: ...
     def items(self) -> list[tuple[str, BetaCounts]]: ...
     def entities(self) -> list[str]: ...
     def entity_counts(self, entity: str) -> dict[str, tuple[float, float]]: ...
@@ -172,11 +178,15 @@ def half_life_to_lambda(half_life: float) -> float: ...
 # -- results -------------------------------------------------------------------------
 
 class FeatureContribution:
-    def __init__(self, feature: str, strength: float, alpha: float, beta: float) -> None: ...
+    def __init__(self, feature: str, strength: float, alpha: float, beta: float,
+                 log_odds: float | None = None) -> None: ...
     feature: str
     strength: float
     alpha: float
     beta: float
+    log_odds: float | None
+    @property
+    def odds_multiplier(self) -> float | None: ...
 
 class AppliedRule:
     def __init__(self, name: str, multiplier: float) -> None: ...
@@ -202,6 +212,11 @@ class Explanation:
     joint_causes: tuple[JointCause, ...]
     entity: str
     prospective: bool
+    combine: str
+    base_log_odds: float | None
+    base_odds: float | None
+    log_odds: float | None
+    odds: float | None
     @property
     def rule_multiplier(self) -> float: ...
     @property
@@ -336,6 +351,7 @@ class LinkRow:
     lo: float
     hi: float
     lift: float
+    log_odds: float | None
 
 class LinkReport:
     effect: str
@@ -375,6 +391,9 @@ class EffectSpec:
     name: str
     kernel: Kernel
     credit: str
+    combine: str
+    learning_rate: float | None
+    l2: float | None
     leak: float
     w_neg: float
     repeatable: bool
@@ -431,10 +450,12 @@ class HeapDB:
     def register_effect(self, name: str, kernel: Kernel,
                         priors: Mapping[str, tuple[float, float]] | None = None,
                         default_prior: tuple[float, float] = (1.0, 4.0),
-                        cause_types: Iterable[str] | None = None, credit: str = "proportional",
+                        cause_types: Iterable[str] | None = None, credit: str | None = None,
                         global_pseudocount: float = 5.0, hierarchical: bool = True,
                         leak: float = 0.05, w_neg: float = 1.0,
-                        repeatable: bool = True) -> EffectSpec: ...
+                        repeatable: bool = True, combine: str = "noisy_or",
+                        learning_rate: float | None = None,
+                        l2: float | None = None) -> EffectSpec: ...
     def effect(self, name: str) -> EffectSpec: ...
     @property
     def effects(self) -> list[str]: ...

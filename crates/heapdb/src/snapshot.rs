@@ -21,7 +21,8 @@ use serde_json::{Map, Value};
 use crate::error::{Error, Result};
 use crate::event::Event;
 use crate::kernels::Kernel;
-use crate::links::{Credit, LinkTable};
+use crate::links::{Combine, Credit, LinkTable};
+use crate::logistic::Logistic;
 use crate::results::CalibrationRecord;
 use crate::rules::Rule;
 use crate::segments::DEFAULT_MAX_SETS;
@@ -294,6 +295,12 @@ impl HeapDB {
                 },
             );
             m.insert("credit".into(), spec.credit.as_str().into());
+            // Only logistic effects carry these keys, so noisy-OR snapshots
+            // are unchanged (and older snapshots load as noisy-OR).
+            if let Some(l) = spec.links.logistic() {
+                m.insert("combine".into(), Combine::Logistic.as_str().into());
+                m.insert("logistic".into(), Value::Object(l.to_json(&self.vocab)));
+            }
             m.insert(
                 "rules".into(),
                 Value::Array(
@@ -439,10 +446,18 @@ impl HeapDB {
             Some(Value::Object(k)) => Kernel::from_json(k)?,
             _ => return Err(missing("kernel")),
         };
-        let links = match rec.get("links") {
+        let mut links = match rec.get("links") {
             Some(Value::Object(l)) => LinkTable::from_json(l, &mut self.vocab)?,
             _ => return Err(missing("links")),
         };
+        let combine = Combine::parse(rec.get("combine").and_then(Value::as_str).unwrap_or("noisy_or"))?;
+        if combine == Combine::Logistic {
+            let state = match rec.get("logistic") {
+                Some(Value::Object(l)) => Logistic::from_json(l, &mut self.vocab)?,
+                _ => Logistic::new(Default::default())?,
+            };
+            links.set_logistic_state(state);
+        }
         let cause_types: Option<BTreeSet<String>> = match rec.get("cause_types") {
             Some(Value::Array(a)) if !a.is_empty() => Some(
                 a.iter()

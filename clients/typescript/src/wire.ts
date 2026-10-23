@@ -150,14 +150,17 @@ export function decodeExplanation(x: J): Explanation | null {
     kernelValue: num(x.kernel_value),
     weight: num(x.weight, 1),
     linkStrength: num(x.link_strength),
-    features: arr(x.features).map(
-      (f: J): FeatureContribution => ({
+    features: arr(x.features).map((f: J): FeatureContribution => {
+      const fc: FeatureContribution = {
         feature: str(f?.feature),
         strength: num(f?.strength),
         alpha: num(f?.alpha),
         beta: num(f?.beta),
-      }),
-    ),
+      };
+      if (typeof f?.log_odds === "number") fc.logOdds = f.log_odds;
+      if (typeof f?.odds_multiplier === "number") fc.oddsMultiplier = f.odds_multiplier;
+      return fc;
+    }),
     warnings: arr(x.warnings).map(String),
     rules: arr(x.rules).map(
       (r: J): AppliedRule => ({ name: str(r?.name), multiplier: num(r?.multiplier, 1) }),
@@ -178,6 +181,11 @@ export function decodeExplanation(x: J): Explanation | null {
   if (typeof x.rule_multiplier === "number") out.ruleMultiplier = x.rule_multiplier;
   if (typeof x.score === "number") out.score = x.score;
   if (typeof x.inseparable === "boolean") out.inseparable = x.inseparable;
+  if (x.combine === "logistic" || x.combine === "noisy_or") out.combine = x.combine;
+  if (typeof x.base_log_odds === "number") out.baseLogOdds = x.base_log_odds;
+  if (typeof x.base_odds === "number") out.baseOdds = x.base_odds;
+  if (typeof x.log_odds === "number") out.logOdds = x.log_odds;
+  if (typeof x.odds === "number") out.odds = x.odds;
   return out;
 }
 
@@ -296,8 +304,8 @@ export function decodeLinkReport(r: J, effect: string, entity: string | undefine
     entity: r && !Array.isArray(r) && "entity" in r ? strOrNull(r.entity) : (entity ?? null),
     baseline: numOrNull(r?.baseline),
     level: numOrNull(r?.level),
-    rows: rows.map(
-      (x: J): LinkRow => ({
+    rows: rows.map((x: J): LinkRow => {
+      const row: LinkRow = {
         feature: str(x?.feature),
         strength: num(x?.strength),
         alpha: num(x?.alpha),
@@ -306,8 +314,10 @@ export function decodeLinkReport(r: J, effect: string, entity: string | undefine
         lo: num(x?.lo),
         hi: num(x?.hi),
         lift: num(x?.lift),
-      }),
-    ),
+      };
+      if (typeof x?.log_odds === "number") row.logOdds = x.log_odds;
+      return row;
+    }),
   };
 }
 

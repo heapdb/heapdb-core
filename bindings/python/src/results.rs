@@ -143,15 +143,28 @@ pub struct PyFeatureContribution {
 #[pymethods]
 impl PyFeatureContribution {
     #[new]
-    fn new(feature: String, strength: f64, alpha: f64, beta: f64) -> Self {
+    #[pyo3(signature = (feature, strength, alpha, beta, log_odds = None))]
+    fn new(feature: String, strength: f64, alpha: f64, beta: f64, log_odds: Option<f64>) -> Self {
         PyFeatureContribution {
             inner: r::FeatureContribution {
                 feature,
                 strength,
                 alpha,
                 beta,
+                log_odds,
             },
         }
+    }
+    /// Logistic weight: the feature adds this to the event's log-odds
+    /// (None under noisy-OR).
+    #[getter]
+    fn log_odds(&self) -> Option<f64> {
+        self.inner.log_odds
+    }
+    /// ``exp(log_odds)``: the factor the feature multiplies the odds by.
+    #[getter]
+    fn odds_multiplier(&self) -> Option<f64> {
+        self.inner.odds_multiplier()
     }
     #[getter]
     fn feature(&self) -> &str {
@@ -296,6 +309,31 @@ impl PyExplanation {
     #[getter]
     fn link_strength(&self) -> f64 {
         self.inner.link_strength
+    }
+    /// ``"noisy_or"`` or ``"logistic"``.
+    #[getter]
+    fn combine(&self) -> &'static str {
+        self.inner.combine()
+    }
+    /// Logistic: the effect's intercept (None under noisy-OR).
+    #[getter]
+    fn base_log_odds(&self) -> Option<f64> {
+        self.inner.base_log_odds
+    }
+    /// Logistic: ``exp(base_log_odds)``.
+    #[getter]
+    fn base_odds(&self) -> Option<f64> {
+        self.inner.base_odds()
+    }
+    /// Logistic: base + every feature's log-odds (``link = sigmoid(log_odds)``).
+    #[getter]
+    fn log_odds(&self) -> Option<f64> {
+        self.inner.log_odds()
+    }
+    /// Logistic: ``exp(log_odds)`` = base odds x every multiplier.
+    #[getter]
+    fn odds(&self) -> Option<f64> {
+        self.inner.odds()
     }
     #[getter]
     fn features<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
@@ -999,6 +1037,11 @@ impl PyLinkRow {
     #[getter]
     fn lift(&self) -> f64 {
         self.inner.lift
+    }
+    /// Logistic weight of the feature (None under noisy-OR).
+    #[getter]
+    fn log_odds(&self) -> Option<f64> {
+        self.inner.log_odds
     }
     fn __repr__(&self) -> String {
         use heapdb::pyfmt::repr_f64 as f;

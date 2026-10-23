@@ -40,6 +40,10 @@ Meta commands::
                                         .effect latency exp 30m
                                         .effect incident window 0 1h
     .prior <effect> <feature> <a> <b>   set a Beta prior for a feature
+    .combine <effect> noisy_or|logistic [lr] [l2]
+                                        how features combine into the link
+                                        (logistic: weights start at the
+                                        prior seeds; default lr 0.1, l2 1)
     .rules <effect>                     list plausibility rules (rules are
                                         Python callables: add them via the API)
     .forget <entity> [scrub]            delete an entity (scrub: also its
@@ -141,6 +145,33 @@ pub fn handle_line(db: &mut HeapDB, line: &str, clock: &mut dyn FnMut() -> Resul
                 let f = vocab.features.intern(args[1]);
                 links.set_prior(f, args[1], a, b)?;
                 format!("ok: prior {} ~ Beta({}, {})", args[1], args[2], args[3])
+            }
+            ".combine" => {
+                if !(2..=4).contains(&args.len()) {
+                    return Err(Error::query(
+                        "usage: .combine <effect> noisy_or|logistic [learning_rate] [l2]",
+                    ));
+                }
+                db.effect(args[0])?;
+                let c = crate::links::Combine::parse(args[1])?;
+                let mut p = crate::logistic::LogisticParams::default();
+                if let Some(x) = args.get(2) {
+                    p.learning_rate = float_arg(x)?;
+                }
+                if let Some(x) = args.get(3) {
+                    p.l2 = float_arg(x)?;
+                }
+                let (links, _) = db.links_mut(args[0])?;
+                links.set_combine(c, Some(p))?;
+                match c {
+                    crate::links::Combine::NoisyOr => format!("ok: {} combines with noisy_or", args[0]),
+                    crate::links::Combine::Logistic => format!(
+                        "ok: {} combines with logistic (learning_rate {}, l2 {})",
+                        args[0],
+                        fmt_g6(p.learning_rate),
+                        fmt_g6(p.l2)
+                    ),
+                }
             }
             ".rules" => {
                 if args.len() != 1 {

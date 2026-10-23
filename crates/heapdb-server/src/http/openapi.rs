@@ -81,7 +81,8 @@ fn schemas() -> Value {
             json!({
                 "dt": {"type": "number"}, "kernel_value": {"type": "number"}, "weight": {"type": "number"},
                 "link_strength": {"type": "number"},
-                "features": arr(obj(json!({"feature": {"type": "string"}, "strength": {"type": "number"}, "alpha": {"type": "number"}, "beta": {"type": "number"}}), &[])),
+                "features": arr(obj(json!({"feature": {"type": "string"}, "strength": {"type": "number"}, "alpha": {"type": "number"}, "beta": {"type": "number"},
+                    "log_odds": {"type": "number", "description": "logistic only"}, "odds_multiplier": {"type": "number", "description": "logistic only"}}), &[])),
                 "warnings": arr(json!({"type": "string"})),
                 "rules": arr(obj(json!({"name": {"type": "string"}, "multiplier": {"type": "number"}}), &[])),
                 "joint_causes": arr(obj(json!({
@@ -90,7 +91,10 @@ fn schemas() -> Value {
                 }), &[])),
                 "entity": {"type": "string"}, "prospective": {"type": "boolean"},
                 "rule_multiplier": {"type": "number"}, "score": {"type": "number"},
-                "inseparable": {"type": "boolean"}, "text": {"type": "string"}
+                "inseparable": {"type": "boolean"}, "text": {"type": "string"},
+                "combine": {"type": "string", "enum": ["logistic"], "description": "logistic only (absent: noisy_or)"},
+                "base_log_odds": {"type": "number", "description": "logistic only"}, "base_odds": {"type": "number", "description": "logistic only"},
+                "log_odds": {"type": "number", "description": "logistic only"}, "odds": {"type": "number", "description": "logistic only"}
             }),
             &[],
         ),
@@ -199,7 +203,8 @@ fn schemas() -> Value {
                 "rows": arr(obj(json!({
                     "feature": {"type": "string"}, "strength": {"type": "number"}, "alpha": {"type": "number"},
                     "beta": {"type": "number"}, "n": {"type": "number"}, "lo": {"type": "number"},
-                    "hi": {"type": "number"}, "lift": {"type": "number"}
+                    "hi": {"type": "number"}, "lift": {"type": "number"},
+                    "log_odds": {"type": "number", "description": "logistic only"}
                 }), &[])),
                 "text": {"type": "string"}
             }),
@@ -237,7 +242,10 @@ fn schemas() -> Value {
                 "name": {"type": "string"}, "kernel": r("KernelSpec"),
                 "priors": {"type": "object", "additionalProperties": arr(json!({"type": "number"}))},
                 "default_prior": arr(json!({"type": "number"})), "cause_types": arr(json!({"type": "string"})),
-                "credit": {"type": "string", "enum": ["proportional", "uniform"]},
+                "credit": {"type": "string", "enum": ["proportional", "uniform"], "description": "default: proportional (noisy_or), uniform (logistic)"},
+                "combine": {"type": "string", "enum": ["noisy_or", "logistic"], "description": "how features combine into the link (default noisy_or)"},
+                "learning_rate": {"type": "number", "description": "logistic only: FTRL learning rate (default 0.1)"},
+                "l2": {"type": "number", "description": "logistic only: L2 penalty towards the prior seeds (default 1)"},
                 "global_pseudocount": {"type": "number"}, "hierarchical": {"type": "boolean"},
                 "leak": num(), "w_neg": {"type": "number"}, "repeatable": {"type": "boolean"}
             }),

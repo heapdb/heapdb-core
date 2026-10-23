@@ -21,11 +21,21 @@
 //! the global layer, so the entity layer is also the ledger of what the
 //! entity contributed (this makes `forget_entity(scrub_global)` exact).
 //!
-//! Features are combined with noisy-OR, `P = 1 - prod(1 - s_f)`.
-//! Confirmations use the EM responsibilities `r_f = s_f / P` (clamped to
-//! `[0, 1]`): `alpha_f += r_f`, `beta_f += 1 - r_f`; rejections add
-//! `beta_f += 1` to every feature. Joint links (per entity, per inseparable
-//! feature set that was judged) are kept for reporting only.
+//! Features are combined into an event's *link* by the effect's
+//! [`Combine`] mode:
+//!
+//! * `noisy_or` (default): `P = 1 - prod(1 - s_f)` over the posterior means.
+//!   Confirmations use the EM responsibilities `r_f = s_f / P` (clamped to
+//!   `[0, 1]`): `alpha_f += r_f`, `beta_f += 1 - r_f`; rejections add
+//!   `beta_f += 1` to every feature.
+//! * `logistic`: `P = sigmoid(b + sum_f w_f)`, an online logistic
+//!   regression seeded from the Beta priors (see [`crate::logistic`]). The
+//!   Beta links are still updated (by default with uniform credit: the
+//!   confirmed event counts as a positive for every feature) and reported,
+//!   but scoring uses the weights.
+//!
+//! Joint links (per entity, per inseparable feature set that was judged)
+//! are kept for reporting only.
 
 use indexmap::IndexMap;
 use rustc_hash::{FxBuildHasher, FxHashMap};
@@ -33,6 +43,7 @@ use serde_json::{Map, Value};
 
 use crate::error::{Error, Result};
 use crate::intern::Vocab;
+use crate::logistic::{beta_logit, sigmoid, Logistic, LogisticParams};
 use crate::pyfmt::repr_str;
 use crate::snapshot::{as_f64, num, pair};
 
@@ -75,6 +86,54 @@ impl Credit {
                 "credit must be one of ('proportional', 'uniform'), got {}",
                 repr_str(s)
             ))),
+        }
+    }
+}
+
+/// How an effect combines the evidence of an event's features into the
+/// event's link.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Combine {
+    /// Noisy-OR of the Beta link means: `1 - prod(1 - s_f)`. Independent
+    /// causes; evidence adds up (in probability).
+    #[default]
+    NoisyOr,
+    /// Logistic: `sigmoid(b + sum_f w_f)`; each feature multiplies the
+    /// odds by `exp(w_f)`. Weights are learned online (FTRL-Proximal,
+    /// L2 towards the Beta-prior seeds).
+    Logistic,
+}
+
+impl Combine {
+    /// `"noisy_or"` or `"logistic"`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Combine::NoisyOr => "noisy_or",
+            Combine::Logistic => "logistic",
+        }
+    }
+
+    /// Parse `"noisy_or"` / `"logistic"`.
+    pub fn parse(s: &str) -> Result<Self> {
+        match s {
+            "noisy_or" => Ok(Combine::NoisyOr),
+            "logistic" => Ok(Combine::Logistic),
+            _ => Err(Error::invalid(format!(
+                "combine must be one of ('noisy_or', 'logistic'), got {}",
+                repr_str(s)
+            ))),
+        }
+    }
+
+    /// The credit mode used when none is given: `proportional` (the EM
+    /// credit derived for noisy-OR) or `uniform` for logistic (each feature
+    /// of a confirmed event counts one positive observation, the count a
+    /// multiplicative model wants; the logistic gradient is likewise the
+    /// same for every feature present).
+    pub fn default_credit(self) -> Credit {
+        match self {
+            Combine::NoisyOr => Credit::Proportional,
+            Combine::Logistic => Credit::Uniform,
         }
     }
 }
@@ -223,9 +282,14 @@ fn pymax0(x: f64) -> f64 {
 
 /// Per-query memo of feature strengths for one [`EntityRef`].
 #[derive(Debug)]
+///
+/// Under `logistic` it also memoises each feature's weight `w_f` and the
+/// intercept (which do not depend on the view).
 pub struct StrengthCache {
     ent: EntityRef,
     map: FxHashMap<FeatureId, f64>,
+    weights: FxHashMap<FeatureId, f64>,
+    bias: Option<f64>,
 }
 
 impl StrengthCache {
@@ -234,6 +298,8 @@ impl StrengthCache {
         StrengthCache {
             ent,
             map: FxHashMap::default(),
+            weights: FxHashMap::default(),
+            bias: None,
         }
     }
 
@@ -253,6 +319,7 @@ pub struct LinkTable {
     global: FxHashMap<FeatureId, [f64; 2]>,
     entity: FxHashMap<EntityId, FxIndexMap<FeatureId, [f64; 2]>>,
     joint: FxHashMap<EntityId, JointMap>,
+    logistic: Option<Logistic>,
 }
 
 impl LinkTable {
@@ -275,7 +342,162 @@ impl LinkTable {
             global: FxHashMap::default(),
             entity: FxHashMap::default(),
             joint: FxHashMap::default(),
+            logistic: None,
         })
+    }
+
+    // -- combine mode ------------------------------------------------------
+
+    /// The combine mode.
+    pub fn combine(&self) -> Combine {
+        if self.logistic.is_some() {
+            Combine::Logistic
+        } else {
+            Combine::NoisyOr
+        }
+    }
+
+    /// Switch the combine mode. Switching to `logistic` starts every weight
+    /// at its seed (`params` default if `None`); switching to `noisy_or`
+    /// drops the weights. The Beta links are kept either way.
+    pub fn set_combine(&mut self, c: Combine, params: Option<LogisticParams>) -> Result<()> {
+        match c {
+            Combine::NoisyOr => self.logistic = None,
+            Combine::Logistic => {
+                let p = params.unwrap_or_default();
+                match &mut self.logistic {
+                    Some(l) => l.params = p.validate()?,
+                    None => self.logistic = Some(Logistic::new(p)?),
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The logistic state (`None` under `noisy_or`).
+    pub fn logistic(&self) -> Option<&Logistic> {
+        self.logistic.as_ref()
+    }
+
+    pub(crate) fn set_logistic_state(&mut self, l: Logistic) {
+        self.logistic = Some(l);
+    }
+
+    /// Seed of the intercept: `logit(mean of default_prior)`.
+    pub fn bias_seed(&self) -> f64 {
+        beta_logit(self.default_prior.0, self.default_prior.1)
+    }
+
+    /// Seed of a feature's weight: `logit(prior mean) - logit(default prior
+    /// mean)` (0 for features without a registered prior).
+    pub fn weight_seed(&self, f: Option<FeatureId>) -> f64 {
+        match f.and_then(|f| self.priors.get(&f)) {
+            None => 0.0,
+            Some(&(a, b)) => beta_logit(a, b) - self.bias_seed(),
+        }
+    }
+
+    /// Logistic intercept `b` (base log-odds); `None` under `noisy_or`.
+    pub fn base_log_odds(&self) -> Option<f64> {
+        self.logistic.as_ref().map(|l| self.bias_seed() + l.bias_delta())
+    }
+
+    /// Logistic weight `w_f` (log-odds multiplier); `None` under `noisy_or`.
+    /// Unknown features (`None`) are at their seed, 0.
+    pub fn weight(&self, f: Option<FeatureId>) -> Option<f64> {
+        let l = self.logistic.as_ref()?;
+        Some(match f {
+            None => 0.0,
+            Some(f) => self.weight_seed(Some(f)) + l.feature_delta(f),
+        })
+    }
+
+    fn weight_cached(&self, f: FeatureId, cache: &mut StrengthCache) -> f64 {
+        if let Some(&w) = cache.weights.get(&f) {
+            return w;
+        }
+        let w = self.weight(Some(f)).unwrap_or(0.0);
+        cache.weights.insert(f, w);
+        w
+    }
+
+    fn bias_cached(&self, cache: &mut StrengthCache) -> f64 {
+        if let Some(b) = cache.bias {
+            return b;
+        }
+        let b = self.base_log_odds().unwrap_or(0.0);
+        cache.bias = Some(b);
+        b
+    }
+
+    /// The link of a feature set under the combine mode (ids in iteration
+    /// order). Under `noisy_or` this is exactly
+    /// [`LinkTable::noisy_or_cached`].
+    pub fn link_cached(&self, fs: &[FeatureId], cache: &mut StrengthCache) -> f64 {
+        if self.logistic.is_none() {
+            return self.noisy_or_cached(fs, cache);
+        }
+        let mut z = self.bias_cached(cache);
+        for &f in fs {
+            z += self.weight_cached(f, cache);
+        }
+        sigmoid(z)
+    }
+
+    /// [`LinkTable::link_cached`] for features that may be unknown (`None`).
+    pub fn link_opt(&self, fs: &[Option<FeatureId>], ent: EntityRef) -> f64 {
+        if self.logistic.is_none() {
+            return self.noisy_or_opt(fs, ent);
+        }
+        sigmoid(self.log_odds_opt(fs))
+    }
+
+    /// Logistic log-odds `b + sum_f w_f` (0 contribution for unknown
+    /// features); 0.0 under `noisy_or`.
+    pub fn log_odds_opt(&self, fs: &[Option<FeatureId>]) -> f64 {
+        let mut z = self.base_log_odds().unwrap_or(0.0);
+        for &f in fs {
+            z += self.weight(f).unwrap_or(0.0);
+        }
+        z
+    }
+
+    /// An upper bound on the link of *any subset* of `fs` (for segment
+    /// bounds): noisy-OR of all of them (noisy-OR only grows with more
+    /// features), or `sigmoid(b + sum_f max(0, w_f))` under `logistic`.
+    pub fn link_upper_bound(
+        &self,
+        fs: impl IntoIterator<Item = FeatureId>,
+        cache: &mut StrengthCache,
+    ) -> f64 {
+        if self.logistic.is_none() {
+            let mut buf = SmallF64::new();
+            for f in fs {
+                buf.push(self.strength_cached(f, cache));
+            }
+            return buf.noisy_or();
+        }
+        let mut z = self.bias_cached(cache);
+        for f in fs {
+            let w = self.weight_cached(f, cache);
+            if w > 0.0 {
+                z += w;
+            }
+        }
+        sigmoid(z)
+    }
+
+    /// One logistic training example (no-op under `noisy_or`): the event
+    /// with features `fs` gets label `y` with example weight `c`.
+    pub fn logistic_step(&mut self, fs: &[FeatureId], y: f64, c: f64, e: Option<EntityId>) {
+        if self.logistic.is_none() {
+            return;
+        }
+        let opt: Vec<Option<FeatureId>> = fs.iter().copied().map(Some).collect();
+        let p = sigmoid(self.log_odds_opt(&opt));
+        if let Some(l) = &mut self.logistic {
+            l.step(fs, p, y, c, e);
+        }
     }
 
     /// Default prior of features without a registered prior.
@@ -508,6 +730,9 @@ impl LinkTable {
     pub fn forget_entity(&mut self, e: EntityId, scrub_global: bool) -> usize {
         let own = self.entity.remove(&e).unwrap_or_default();
         self.joint.remove(&e);
+        if let Some(l) = &mut self.logistic {
+            l.forget_entity(e, scrub_global);
+        }
         if scrub_global {
             for (f, [p, n]) in &own {
                 if let Some(g) = self.global.get_mut(f) {

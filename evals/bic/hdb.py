@@ -22,6 +22,12 @@ Mapping:
 
 Optional: ``dose`` = ``log1p(lines changed)`` scaled so 100 lines = 1, and an
 exponential lag kernel instead of a flat window.
+
+``combine="logistic"`` registers the effect with HeapDB's logistic combine
+mode instead of noisy-OR: ``link = sigmoid(b + sum_f w_f)``, weights learned
+online (FTRL-Proximal) from the same confirm/reject feedback. Those configs
+use HeapDB's default prior Beta(1, 4) (it only seeds the intercept) and
+vary the learning rate instead of the prior.
 """
 
 from __future__ import annotations
@@ -44,9 +50,14 @@ class HDBConfig:
     dose: bool = False
     prior: tuple[float, float] = (0.001, 10.0)
     learn: bool = True
+    combine: str = "noisy_or"               # "noisy_or" | "logistic"
+    lr: float = 0.1                         # logistic learning rate
 
     @property
     def name(self) -> str:
+        if self.combine == "logistic":
+            return (f"combine=logistic,kernel={self.kernel},dose={'on' if self.dose else 'off'},"
+                    f"lr={self.lr:g}")
         p = f"{self.prior[0]:g}/{self.prior[1]:g}"
         return f"kernel={self.kernel},dose={'on' if self.dose else 'off'},prior={p}"
 
@@ -80,9 +91,17 @@ class HeapDBRanker:
 
     def reset(self) -> None:
         self.db = heapdb.HeapDB(bucket_seconds=30 * DAY)
-        self.db.register_effect(self.EFFECT, make_kernel(self.cfg.kernel),
-                                default_prior=self.cfg.prior, cause_types=["commit"],
-                                credit="proportional", global_pseudocount=1e12, hierarchical=True)
+        if self.cfg.combine == "logistic":
+            # credit: the logistic default (uniform); it only feeds the Beta
+            # evidence ledger, scoring uses the learned weights.
+            self.db.register_effect(self.EFFECT, make_kernel(self.cfg.kernel),
+                                    default_prior=self.cfg.prior, cause_types=["commit"],
+                                    global_pseudocount=1e12, hierarchical=True,
+                                    combine="logistic", learning_rate=self.cfg.lr)
+        else:
+            self.db.register_effect(self.EFFECT, make_kernel(self.cfg.kernel),
+                                    default_prior=self.cfg.prior, cause_types=["commit"],
+                                    credit="proportional", global_pseudocount=1e12, hierarchical=True)
         self._ids = {}
 
     def _insert(self, view: CaseView) -> dict[str, int]:
@@ -124,9 +143,15 @@ class HeapDBRanker:
 
     # -- inspection ------------------------------------------------------------------
     def links(self, min_support: float = 20.0) -> list[tuple[str, float, float]]:
-        """(feature, strength, evidence n) from the global layer."""
+        """(feature, strength, evidence n) from the global layer; under
+        logistic, (feature, weight = log-odds multiplier, evidence n)."""
         rep = self.db.link_report(self.EFFECT, entity=None, min_support=min_support)
+        if self.cfg.combine == "logistic":
+            return [(r.feature, r.log_odds, r.n) for r in rep]
         return [(r.feature, r.strength, r.n) for r in rep]
+
+    def base_log_odds(self) -> float | None:
+        return self.db.effect(self.EFFECT).links.base_log_odds
 
 
 #: Grid fixed in advance (prequential follow-the-leader picks from it).
@@ -135,3 +160,13 @@ GRID = [HDBConfig(kernel=k, dose=d, prior=p)
         for d in (False, True)
         for p in ((0.001, 10.0), (0.01, 10.0))]
 DEFAULT = GRID[0]
+
+#: Logistic combine mode: the same kernel x dose grid, with the learning rate
+#: in place of the prior (HeapDB's default prior Beta(1, 4) seeds the
+#: intercept). Fixed before the full runs, from the development slice.
+LOGISTIC_PRIOR = (1.0, 4.0)
+LGRID = [HDBConfig(kernel=k, dose=d, prior=LOGISTIC_PRIOR, combine="logistic", lr=lr)
+         for k in ("flat", "exp1y")
+         for d in (False, True)
+         for lr in (0.1, 0.5)]
+LDEFAULT = LGRID[0]

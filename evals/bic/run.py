@@ -25,7 +25,7 @@ from pathlib import Path
 import numpy as np
 
 from . import baselines as B
-from . import d4j, dpdk, hdb, signals, sources
+from . import combine_dev, d4j, dpdk, hdb, signals, sources
 from .core import (Case, follow_the_leader, prequential, rank_of, rr, standard_bisection,
                    stream_order, weighted_bisection)
 
@@ -127,6 +127,7 @@ def heapdb_suite(R: Runner, inputs: str, ablations: bool = True) -> None:
           **{k: d[k] for k in ("links_top", "links_bottom") if k in d})
     R.ftl("heapdb+learned+tuned", recs, "as heapdb+learned; kernel, dose and prior picked per bug by "
           "follow-the-leader over the fixed grid (best MRR on the bugs already seen)", "heapdb", inputs)
+    logistic_suite(R, inputs)
     if ablations:
         def only(prefixes):
             return lambda c: tuple(x for x in c.cat if x.startswith(prefixes))
@@ -138,6 +139,25 @@ def heapdb_suite(R: Runner, inputs: str, ablations: bool = True) -> None:
             hdb.DEFAULT, features=only(("author:", "dir:", "kw:", "comp:")))),
             "heapdb+learned with only author/dir/keyword/component features (no signal buckets)",
             "ablation", inputs)
+
+
+def logistic_suite(R: Runner, inputs: str) -> None:
+    """HeapDB with ``combine="logistic"``: same protocol, same feedback."""
+    def weights(m):
+        rows = sorted(m.links(min_support=20.0), key=lambda r: -r[1])
+        return {"links_top": rows[:15], "links_bottom": rows[-8:], "base_log_odds": m.base_log_odds()}
+
+    recs = {}
+    for cfg in hdb.LGRID:
+        recs[cfg.name] = R.run(f"heapdb-{cfg.name}", lambda cfg=cfg: hdb.HeapDBRanker(cfg),
+                               extra=weights if cfg == hdb.LDEFAULT else None)
+    d = recs[hdb.LDEFAULT.name]
+    R.add("heapdb+logistic", d, "HeapDB, combine=logistic: link = sigmoid(b + sum of feature weights), "
+          "weights learned online (FTRL-Proximal, L2 towards the prior seeds) from the same prequential "
+          f"feedback; default config {hdb.LDEFAULT.name}, prior Beta(1, 4)", "heapdb", inputs,
+          **{k: d[k] for k in ("links_top", "links_bottom", "base_log_odds") if k in d})
+    R.ftl("heapdb+logistic+tuned", recs, "as heapdb+logistic; kernel, dose and learning rate (0.1, 0.5) "
+          "picked per bug by follow-the-leader over the fixed grid", "heapdb", inputs)
 
 
 def ltr_suite(R: Runner, inputs: str, retrain_every: int, neg_per_bug, lm_every: int) -> None:
@@ -334,6 +354,18 @@ def dpdk_track(data: dict, fresh: bool) -> dict:
     return finish(R, cases)
 
 
+def design(R: Runner) -> dict:
+    """Combine formulations tried for the logistic mode, development slice only."""
+    dev_n = int(round(DEV_FRACTION * len(R.stream)))
+    rec = R.cached("combine-dev")
+    if rec is None:
+        t0 = time.time()
+        rec = R.save("combine-dev", {"dev_n": dev_n, "mrr": combine_dev.run_dev(R.stream, dev_n),
+                                     "seconds": round(time.time() - t0, 1)})
+        print(f"  [{R.tag}] combine-dev ({rec['seconds']}s)", flush=True)
+    return rec
+
+
 def finish(R: Runner, cases: list[Case], extra: dict | None = None) -> dict:
     n = len(R.stream)
     out = {
@@ -349,6 +381,7 @@ def finish(R: Runner, cases: list[Case], extra: dict | None = None) -> dict:
             "dev_n": int(round(DEV_FRACTION * n)),
         },
         "methods": R.methods,
+        "design": design(R),
     }
     if extra:
         out.update(extra)
@@ -389,6 +422,8 @@ def main(argv=None) -> None:
     res = {"meta": {"env": env(), "method_version": METHOD_VERSION, "dev_fraction": DEV_FRACTION,
                     "hdb_grid": [asdict(c) | {"name": c.name} for c in hdb.GRID],
                     "hdb_default": hdb.DEFAULT.name,
+                    "hdb_logistic_grid": [asdict(c) | {"name": c.name} for c in hdb.LGRID],
+                    "hdb_logistic_default": hdb.LDEFAULT.name,
                     "command": "python -m evals.bic.run " + " ".join(argv if argv is not None else sys.argv[1:])},
            "datasets": {}}
     if os.path.exists(a.out):
