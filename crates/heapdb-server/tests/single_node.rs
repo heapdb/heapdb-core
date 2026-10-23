@@ -754,7 +754,10 @@ async fn http_conventions() {
     .await;
     assert_eq!(r.code(), "database_not_found");
     let huge = "x".repeat(9 << 20);
-    let r = c
+    // Its own client: the server answers 413 without reading the whole body and closes the
+    // connection, so a pooled client could reuse that dead connection for the next request
+    // (intermittent "BrokenPipe" on /readyz in CI).
+    let r = http()
         .post(db.url("/events"))
         .bearer_auth(&db.key)
         .body(huge)
