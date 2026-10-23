@@ -165,7 +165,11 @@ and ties BM25 on diffs; on the FL track it also ties FONTE and FONTE's
 max-aggregation baseline. On DPDK it beats every unsupervised signal. Against
 the learned rankers on the same inputs, it ties logistic regression on the
 Defects4J report track and trails logistic regression and LambdaMART on the
-FL track and on DPDK. Every number,
+FL track and on DPDK. HeapDB's optional logistic combine mode (online
+logistic regression over the same features and feedback) beats noisy-OR
+HeapDB on the FL track and on DPDK and ties it on the report track; it ties
+tuned logistic regression on both Defects4J tracks and trails LambdaMART on
+DPDK by a small margin. Every number,
 with its CI, is in [RESULTS.md](RESULTS.md); the summary there is generated
 from `results.json` and states wins, ties and losses only from paired
 bootstrap CIs.

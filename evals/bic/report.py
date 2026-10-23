@@ -45,6 +45,7 @@ LOGISTIC = "heapdb+logistic+tuned"
 LOGISTIC_DEFAULT = "heapdb+logistic"
 EQUAL_GROUPS = ("baseline", "learned")
 WORD = {"win": "ahead", "tie": "statistically tied", "loss": "behind"}
+VS = {"win": "ahead of", "tie": "statistically tied with", "loss": "behind"}
 
 
 def rrs(m: dict) -> list[float]:
@@ -149,8 +150,8 @@ def logistic_bullets(M: dict, n: int) -> list[str]:
     ref0 = max((nm for nm in M if M[nm]["group"] in EQUAL_GROUPS), key=lambda nm: statistics.fmean(rrs(M[nm])[:k]))
     d, lo, hi = paired_bootstrap(rrs(M[LOGISTIC_DEFAULT])[:k], rrs(M[ref0])[:k])
     d0, lo0, hi0 = paired_bootstrap(rrs(M[LOGISTIC_DEFAULT])[:k], rrs(M["heapdb+learned"])[:k])
-    L.append(f"- **Logistic cold start** (first {k} bugs): `{LOGISTIC_DEFAULT}` is {WORD[verdict(lo, hi)]} of "
-             f"`{ref0}` (ΔMRR {d:+.3f} [{lo:+.3f}, {hi:+.3f}]) and {WORD[verdict(lo0, hi0)]} of noisy-OR "
+    L.append(f"- **Logistic cold start** (first {k} bugs): `{LOGISTIC_DEFAULT}` is {VS[verdict(lo, hi)]} "
+             f"`{ref0}` (ΔMRR {d:+.3f} [{lo:+.3f}, {hi:+.3f}]) and {VS[verdict(lo0, hi0)]} noisy-OR "
              f"`heapdb+learned` (ΔMRR {d0:+.3f} [{lo0:+.3f}, {hi0:+.3f}]).")
     L.append("")
     return L
@@ -205,17 +206,25 @@ def design_table(res: dict) -> list[str]:
     nb = "(a)+(b) naive Bayes, learned base, count credit"
     lr = "(c) online LR, per event, lr 0.1 (= engine default)"
     if nb in rows and lr in rows:
-        nb_worse = [f"{ds}/{tr}" for ds, tr, T in tracks if T["design"]["mrr"][nb] < T["design"]["mrr"][ref]]
-        lr_worse = [f"{ds}/{tr}" for ds, tr, T in tracks if T["design"]["mrr"][lr] < T["design"]["mrr"][ref]]
-        L.append("Reading: multiplying the Beta links' odds (naive Bayes, the simplest option) is "
-                 + (f"below noisy-OR on {', '.join(nb_worse)}" if nb_worse else "at or above noisy-OR on every track")
-                 + "; naive Bayes counts correlated evidence (several buckets of related signals) once per "
-                 "feature. The online logistic regression learns discriminative weights instead and is "
-                 + (f"below noisy-OR on {', '.join(lr_worse)}" if lr_worse else "at or above noisy-OR on every track")
-                 + " on these slices, so the engine implements (c). Count credit beats the noisy-OR EM credit for "
-                 "the naive-Bayes variants, and an intercept seeded at a tiny base rate slows the online learner "
-                 "(its negative examples then have almost no gradient), which is why the logistic runs use "
-                 "HeapDB's default prior Beta(1, 4) to seed it.\n")
+        def deltas(r):
+            return {f"{ds}/{tr}": T["design"]["mrr"][r] - T["design"]["mrr"][ref] for ds, tr, T in tracks}
+        dn, dl = deltas(nb), deltas(lr)
+        def describe(d):
+            below = [k for k, v in d.items() if v < 0]
+            above = [k for k, v in d.items() if v >= 0]
+            parts = []
+            if above:
+                parts.append(f"at or above noisy-OR on {', '.join(above)}")
+            if below:
+                parts.append(f"below it on {', '.join(below)} (by up to {-min(d.values()):.3f})")
+            return " and ".join(parts)
+        L.append("Reading: multiplying the odds of the existing Beta links (naive Bayes with a learned base, "
+                 f"the simplest option) is {describe(dn)}: naive Bayes counts correlated evidence (several "
+                 "buckets of related signals) once per feature. The online logistic regression, which learns "
+                 f"discriminative weights, is {describe(dl)}, so the engine implements (c). Count credit beats "
+                 "the noisy-OR EM credit for the naive-Bayes variants, and an intercept seeded at a tiny base "
+                 "rate slows the online learner (its negative examples then have almost no gradient), which is "
+                 "why the logistic runs seed it with HeapDB's default prior Beta(1, 4).\n")
     return L
 
 

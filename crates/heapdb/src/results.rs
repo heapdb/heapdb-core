@@ -694,11 +694,16 @@ impl fmt::Display for LinkReport {
             self.effect,
             fmt_f(self.baseline, 3)
         )?;
+        // Logistic effects get one more column: the feature's weight.
+        let logistic = self.rows.iter().any(|r| r.log_odds.is_some());
         write!(
             f,
             "\n  {:<36} {:>6} {:>15} {:>6} {:>8} {:>8} {:>8}",
             "feature", "mean", pct, "lift", "n", "alpha", "beta"
         )?;
+        if logistic {
+            write!(f, " {:>8}", "log-odds")?;
+        }
         for r in &self.rows {
             write!(
                 f,
@@ -712,6 +717,9 @@ impl fmt::Display for LinkReport {
                 fmt_f(r.alpha, 2),
                 fmt_f(r.beta, 2)
             )?;
+            if let Some(w) = r.log_odds {
+                write!(f, " {:>8}", format!("{w:+.3}"))?;
+            }
         }
         if self.rows.is_empty() {
             f.write_str("\n  (no features with enough support)")?;

@@ -471,3 +471,34 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn repl_switches_the_combine_mode_and_links_show_weights() {
+    use heapdb::repl::{handle_line, Outcome};
+    let mut db = HeapDB::new(900.0, 64).unwrap();
+    let mut clock = || Ok(10.0 * H);
+    let mut run = |db: &mut HeapDB, l: &str| -> String {
+        match handle_line(db, l, &mut clock).unwrap() {
+            Outcome::Output(s) => s.unwrap_or_default(),
+            _ => String::new(),
+        }
+    };
+    run(&mut db, ".effect fx window 0 10h");
+    assert!(run(&mut db, ".combine fx logistic 0.5").contains("logistic (learning_rate 0.5, l2 1)"));
+    assert_eq!(
+        db.effect("fx").unwrap().logistic_params().unwrap().learning_rate,
+        0.5
+    );
+    run(&mut db, "INSERT deploy FOR svc AT 0 FEATURES migration,team");
+    run(&mut db, "INSERT deploy FOR svc AT 60 FEATURES config,team");
+    run(&mut db, "FEEDBACK fx FOR svc AT 3600 CONFIRMED 1 REJECTED 2");
+    let links = run(&mut db, "LINKS OF fx MIN 0");
+    assert!(links.contains("log-odds"), "{links}");
+    let top = run(&mut db, "TOP 1 CAUSES OF fx FOR svc AT 3600 EXPLAIN");
+    assert!(top.contains("logistic: base odds"), "{top}");
+    run(&mut db, ".combine fx noisy_or");
+    assert_eq!(db.effect("fx").unwrap().combine(), Combine::NoisyOr);
+    assert!(!run(&mut db, "LINKS OF fx MIN 0").contains("log-odds"));
+    assert!(handle_line(&mut db, ".combine fx bogus", &mut clock).is_err());
+    assert!(handle_line(&mut db, ".combine nope logistic", &mut clock).is_err());
+}

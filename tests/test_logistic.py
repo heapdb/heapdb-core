@@ -93,6 +93,28 @@ def test_explanation_fields_and_feedback():
     assert pe.features[0].log_odds is None and pe.features[0].odds_multiplier is None
 
 
+def test_calibration_report_works_under_logistic():
+    db = HeapDB()
+    db.register_effect("inc", WindowKernel(0, 6 * H), combine="logistic", learning_rate=0.5)
+    rng = random.Random(1)
+    for day in range(30):
+        t0 = day * 86400.0
+        evs = [db.insert("svc", t0 + i * 600, "deploy", {rng.choice(["migration", "config", "flag"])})
+               for i in range(4)]
+        bad = next((e for e in evs if "migration" in e.features), evs[0])
+        db.feedback("svc", "inc", t0 + 3 * H, confirmed_event_id=bad.id,
+                    rejected_ids=[e.id for e in evs if e.id != bad.id])
+    rep = db.calibration_report("inc", bins=5)
+    assert rep.n == 120 and 0.0 <= rep.brier <= 1.0
+    assert all(0.0 <= r.score <= 1.0 for r in db.calibration_records("inc"))
+    # Later scores separate the cause better than the early ones.
+    recs = db.calibration_records("inc")
+    late = [r for r in recs[-40:]]
+    conf = [r.score for r in late if r.confirmed]
+    rej = [r.score for r in late if not r.confirmed]
+    assert sum(conf) / len(conf) > sum(rej) / len(rej)
+
+
 def test_snapshot_round_trip(tmp_path):
     db, a, b = bloat(learning_rate=0.5)
     db.feedback("me", "bloating", 2 * H, confirmed_event_id=a.id, rejected_ids=[b.id])
